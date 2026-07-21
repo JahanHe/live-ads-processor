@@ -37,14 +37,15 @@ STATIC_DIR = APP_DIR / "static"
 
 
 def summarize_rows(rows):
+    spend_yuan = sum(to_number(row.get("总消耗")) for row in rows)
     totals = {
         "rows": len(rows),
-        "spend_beans": sum(to_number(row.get("总消耗")) for row in rows),
+        "spend_beans": spend_yuan * 10,
+        "spend_yuan": spend_yuan,
         "deal_amount": sum(to_number(row.get("总成交金额")) for row in rows),
         "order_amount": sum(to_number(row.get("总下单金额")) for row in rows),
         "deal_orders": sum(to_number(row.get("总成交订单数")) for row in rows),
     }
-    totals["spend_yuan"] = totals["spend_beans"] / 10
     totals["deal_roi"] = totals["deal_amount"] / totals["spend_yuan"] if totals["spend_yuan"] else 0
     return totals
 

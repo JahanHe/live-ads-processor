@@ -239,8 +239,8 @@ def aggregate_rows(rows):
 
 def summary_values(aggregates, target):
     agg = aggregates[target]
-    spend_beans = agg["总消耗"]
-    spend_yuan = spend_beans / 10
+    spend_yuan = agg["总消耗"]
+    spend_beans = spend_yuan * 10
     order_amount = agg["总下单金额"]
     deal_amount = agg["总成交金额"]
     deal_orders = agg["总成交订单数"]
@@ -575,8 +575,9 @@ def populate_summary(
                 ws.cell(metric_rows[metric], col_idx, value)
         else:
             col = get_column_letter(col_idx)
-            ws.cell(metric_rows["总消耗（豆）"], col_idx, sum_formula(target, source_cols["总消耗"], source_last_row))
-            ws.cell(metric_rows["总消耗金额"], col_idx, f"={col}{metric_rows['总消耗（豆）']}/10")
+            spend_formula = sum_formula(target, source_cols["总消耗"], source_last_row)
+            ws.cell(metric_rows["总消耗金额"], col_idx, spend_formula)
+            ws.cell(metric_rows["总消耗（豆）"], col_idx, f"={col}{metric_rows['总消耗金额']}*10")
             ws.cell(metric_rows["服务费"], col_idx, f"={col}{metric_rows['总消耗金额']}*10%")
             ws.cell(metric_rows["合计金额"], col_idx, f"={col}{metric_rows['总消耗金额']}+{col}{metric_rows['服务费']}")
             ws.cell(metric_rows["总下单金额"], col_idx, sum_formula(target, source_cols["总下单金额"], source_last_row))
@@ -658,8 +659,9 @@ def populate_summary_horizontal(
             for col_idx, metric in enumerate(SUMMARY_METRICS, 2):
                 ws.cell(row_idx, col_idx, values[metric])
         else:
-            ws.cell(row_idx, 2, sum_formula(target, source_cols["总消耗"], source_last_row))
-            ws.cell(row_idx, 3, f"=B{row_idx}/10")
+            spend_formula = sum_formula(target, source_cols["总消耗"], source_last_row)
+            ws.cell(row_idx, 3, spend_formula)
+            ws.cell(row_idx, 2, f"=C{row_idx}*10")
             ws.cell(row_idx, 4, f"=C{row_idx}*10%")
             ws.cell(row_idx, 5, f"=C{row_idx}+D{row_idx}")
             ws.cell(row_idx, 6, sum_formula(target, source_cols["总下单金额"], source_last_row))
