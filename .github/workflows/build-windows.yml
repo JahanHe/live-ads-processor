@@ -17,6 +17,7 @@ on:
       - "requirements.txt"
       - "live_ads_processor.spec"
       - "package.json"
+      - "assets/**"
       - "electron/**"
       - "static/**"
       - ".github/workflows/build-windows.yml"

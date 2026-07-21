@@ -45,7 +45,7 @@ https://github.com/JacksonHe666/live-ads-processor/releases
 Windows 用户下载：
 
 ```text
-live-ads-processor-windows-v2.2.0.exe
+live-ads-processor-windows-v2.2.1.exe
 ```
 
 详细步骤见：
@@ -65,7 +65,7 @@ https://github.com/JacksonHe666/live-ads-processor/releases
 M 系列 Mac 用户下载：
 
 ```text
-live-ads-processor-mac-arm64-v2.2.0.dmg
+live-ads-processor-mac-arm64-v2.2.1.dmg
 ```
 
 下载 `.dmg` 后双击打开即可安装/运行。这个版本是 Apple Silicon 原生版本，适合 M1/M2/M3/M4 等 M 系列芯片。
