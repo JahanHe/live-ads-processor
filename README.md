@@ -50,7 +50,7 @@ pip install -r requirements.txt
 推荐从 GitHub Release 下载正式版本：
 
 ```text
-https://github.com/JacksonHe666/live-ads-processor/releases
+https://github.com/JahanHe/live-ads-processor/releases
 ```
 
 Windows 用户下载：
@@ -70,7 +70,7 @@ GITHUB_WINDOWS_EXE.md
 推荐从 GitHub Release 下载正式版本：
 
 ```text
-https://github.com/JacksonHe666/live-ads-processor/releases
+https://github.com/JahanHe/live-ads-processor/releases
 ```
 
 M 系列 Mac 用户下载：
