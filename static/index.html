@@ -38,6 +38,14 @@
                 <button class="secondary-button" id="chooseButton" type="button">选择 CSV</button>
               </div>
 
+              <div class="dropzone" id="longPlanZone">
+                <input id="longPlanInput" type="file" accept=".csv,text/csv,.xlsx,.xlsm" multiple />
+                <div class="file-icon">PLAN</div>
+                <h2>添加长期计划</h2>
+                <p id="longPlanHint">可选，支持长期计划 CSV 或 XLSX</p>
+                <button class="secondary-button" id="chooseLongPlanButton" type="button">选择长期计划</button>
+              </div>
+
               <div class="dropzone screenshot-zone" id="screenshotZone">
                 <input id="screenshotInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
                 <div class="file-icon">IMG</div>
@@ -66,6 +74,14 @@
                 <strong id="fileName"></strong>
               </div>
               <button class="text-button" id="clearButton" type="button">移除</button>
+            </div>
+
+            <div class="selected-file" id="selectedLongPlans" hidden>
+              <div>
+                <span class="label">当前长期计划</span>
+                <strong id="longPlanName"></strong>
+              </div>
+              <button class="text-button" id="clearLongPlanButton" type="button">移除</button>
             </div>
 
             <div class="selected-file" id="selectedScreenshots" hidden>

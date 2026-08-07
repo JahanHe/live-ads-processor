@@ -4,7 +4,7 @@ import csv
 import re
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -39,6 +39,31 @@ INPUT_ALIASES = {
     "当场成交订单数": "总成交订单数",
     "当场下单金额": "总下单金额",
     "当场下单订单数": "总下单订单数",
+}
+
+LONG_PLAN_ALIASES = {
+    "消耗总金额": ("总消耗", 1),
+    "直播间消耗": ("总消耗", 1),
+    "曝光总人数": ("直播间曝光人数", 1),
+    "直播间曝光人数": ("直播间曝光人数", 1),
+    "进入总人数": ("直播间观看人数", 1),
+    "直播间观看人数": ("直播间观看人数", 1),
+    "点赞总次数": ("直播间点赞次数", 1),
+    "直播间点赞次数": ("直播间点赞次数", 1),
+    "评论总次数": ("直播间评论次数", 1),
+    "直播间评论次数": ("直播间评论次数", 1),
+    "新增总关注": ("直播间新增粉丝数", 1),
+    "直播间新增粉丝数": ("直播间新增粉丝数", 1),
+    "当场成交GMV": ("总成交金额", 1),
+    "直接成交GMV": ("总成交金额", 1),
+    "净成交金额": ("总成交金额", 1),
+    "当场成交订单数": ("总成交订单数", 1),
+    "直接成交订单数": ("总成交订单数", 1),
+    "净成交订单数": ("总成交订单数", 1),
+    "当场下单GMV": ("总下单金额", 1),
+    "直接下单GMV": ("总下单金额", 1),
+    "当场下单订单数": ("总下单订单数", 1),
+    "直接下单订单数": ("总下单订单数", 1),
 }
 
 NUMERIC_HEADERS = {
@@ -168,6 +193,58 @@ def read_csv_files(input_paths):
     return header_sets, all_rows
 
 
+def row_from_long_plan(raw, filename):
+    row = {header: 0 if header in NUMERIC_HEADERS else "" for header in SOURCE_HEADERS}
+    row["名称"] = "长期计划"
+    row["编号"] = Path(filename).stem
+    for key, value in raw.items():
+        header = clean_header(key)
+        if header in {"加热主播", "创建时间", "加热开始时间", "加热结束时间"}:
+            row[header] = value
+            continue
+        target = LONG_PLAN_ALIASES.get(header)
+        if target:
+            source_header, multiplier = target
+            row[source_header] = to_number(value) * multiplier
+    return row
+
+
+def read_long_plan_file(input_path):
+    path = Path(input_path)
+    suffix = path.suffix.lower()
+    # ponytail: 长期计划按表格导出解析；如果平台只能给截图，再升级为 OCR。
+    if suffix == ".csv":
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            headers = [clean_header(header) for header in (reader.fieldnames or [])]
+            rows = [row_from_long_plan(raw, path.name) for raw in reader]
+        return headers, rows
+    if suffix in {".xlsx", ".xlsm"}:
+        wb = load_workbook(path, data_only=True, read_only=True)
+        ws = wb.active
+        values = list(ws.iter_rows(values_only=True))
+        if not values:
+            return [], []
+        headers = [clean_header(value) for value in values[0]]
+        rows = []
+        for value_row in values[1:]:
+            raw = {headers[idx]: value for idx, value in enumerate(value_row) if idx < len(headers)}
+            if any(str(value or "").strip() for value in value_row):
+                rows.append(row_from_long_plan(raw, path.name))
+        return headers, rows
+    raise ValueError(f"{path.name} 不是支持的长期计划文件。")
+
+
+def read_long_plan_files(input_paths):
+    all_rows = []
+    header_sets = []
+    for input_path in input_paths:
+        headers, rows = read_long_plan_file(input_path)
+        header_sets.append((Path(input_path).name, headers))
+        all_rows.extend(rows)
+    return header_sets, all_rows
+
+
 def validate_inputs(header_sets, rows):
     warnings = []
     for filename, headers in header_sets:
@@ -184,6 +261,16 @@ def validate_inputs(header_sets, rows):
     anchors = sorted({str(row.get("加热主播", "")).strip() for row in rows if str(row.get("加热主播", "")).strip()})
     if len(anchors) > 1:
         warnings.append(f"检测到多个加热主播：{'、'.join(anchors)}。请确认是否应合并处理。")
+    return warnings
+
+
+def validate_long_plan_inputs(header_sets):
+    warnings = []
+    known_headers = set(LONG_PLAN_ALIASES) | {"加热主播", "创建时间", "加热开始时间", "加热结束时间"}
+    for filename, headers in header_sets:
+        matched = known_headers.intersection(headers)
+        if not matched:
+            warnings.append(f"{filename} 没有识别到长期计划字段，请确认表头是否来自长期计划导出。")
     return warnings
 
 
@@ -788,10 +875,15 @@ def build_workbook(
     image_paths=None,
     combined_image_path=None,
     rate_metrics_as_percent=True,
+    long_plan_paths=None,
 ):
     csv_paths = [csv_path] if isinstance(csv_path, (str, Path)) else list(csv_path)
     header_sets, rows = read_csv_files(csv_paths)
     warnings = validate_inputs(header_sets, rows)
+    if long_plan_paths:
+        long_header_sets, long_rows = read_long_plan_files(long_plan_paths)
+        warnings.extend(validate_long_plan_inputs(long_header_sets))
+        rows.extend(long_rows)
     aggregates = aggregate_rows(rows)
     first_date = (
         normalize_date_text(rows[0].get("加热开始时间", ""))
@@ -829,6 +921,7 @@ def main():
     parser.add_argument("csv", nargs="+", help="输入 CSV 文件路径，可传多个")
     parser.add_argument("-o", "--output", help="输出 XLSX 文件路径")
     parser.add_argument("--image", action="append", default=[], help="插入到数据汇总旁边的截图路径，可重复")
+    parser.add_argument("--long-plan", action="append", default=[], help="长期计划 CSV/XLSX 路径，可重复")
     parser.add_argument("--no-thousands", action="store_true", help="数字不使用千分位")
     parser.add_argument("--decimal-mode", choices=["fixed2", "full"], default="fixed2", help="小数格式")
     parser.add_argument("--no-transpose-summary", action="store_true", help="数据情况横向不转置")
@@ -848,6 +941,7 @@ def main():
         remove_zero_columns=args.remove_zero_columns,
         image_paths=[Path(path) for path in args.image],
         rate_metrics_as_percent=not args.rate_metrics_as_decimal,
+        long_plan_paths=[Path(path) for path in args.long_plan],
     )
     print(output_path)
     for warning in result["warnings"]:

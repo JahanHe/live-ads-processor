@@ -32,7 +32,7 @@ GitHub Actions 使用：
 输出文件名类似：
 
 ```text
-live-ads-processor-windows-v2.2.1.exe
+live-ads-processor-windows-v2.3.0.exe
 ```
 
 从 v2.2.0 开始，后端改为目录式打包，启动时不再每次解压完整 Python 程序，打开速度会比旧版本更稳定。

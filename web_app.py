@@ -20,8 +20,10 @@ from process_live_ads import (
     build_workbook,
     default_output_stem,
     read_csv_files,
+    read_long_plan_files,
     to_number,
     validate_inputs,
+    validate_long_plan_inputs,
 )
 
 
@@ -139,6 +141,7 @@ class AppHandler(BaseHTTPRequestHandler):
         job_dir = OUTPUT_DIR / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
         temp_csvs = []
+        temp_long_plans = []
         temp_images = []
         custom_output_name = str(form.getfirst("outputName", "")).strip()
         use_thousands = form_bool(form, "useThousands", True)
@@ -155,6 +158,15 @@ class AppHandler(BaseHTTPRequestHandler):
                 with temp_csv.open("wb") as f:
                     f.write(upload.file.read())
                 temp_csvs.append(temp_csv)
+            long_plans = form_files(form, "longPlans")
+            for idx, plan in enumerate(long_plans, 1):
+                suffix = Path(plan.filename).suffix.lower()
+                if suffix not in {".csv", ".xlsx", ".xlsm"}:
+                    raise ValueError("长期计划只支持 CSV 或 XLSX 文件。")
+                temp_plan = Path(tempfile.gettempdir()) / f"live_ads_{job_id}_long_plan_{idx}{suffix}"
+                with temp_plan.open("wb") as f:
+                    f.write(plan.file.read())
+                temp_long_plans.append(temp_plan)
             screenshots = form_files(form, "screenshots")
             for idx, screenshot in enumerate(screenshots, 1):
                 suffix = Path(screenshot.filename).suffix.lower() or ".png"
@@ -167,6 +179,10 @@ class AppHandler(BaseHTTPRequestHandler):
             if not rows:
                 raise ValueError("CSV 没有数据行。")
             warnings = validate_inputs(header_sets, rows)
+            if temp_long_plans:
+                long_header_sets, long_rows = read_long_plan_files(temp_long_plans)
+                warnings.extend(validate_long_plan_inputs(long_header_sets))
+                rows.extend(long_rows)
             output_name = safe_xlsx_name(custom_output_name or default_output_stem(rows))
             output_path = job_dir / output_name
             combined_image_name = f"{Path(output_name).stem}_拼接图.png"
@@ -181,6 +197,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 image_paths=temp_images,
                 combined_image_path=combined_image_path,
                 rate_metrics_as_percent=rate_metrics_as_percent,
+                long_plan_paths=temp_long_plans,
             )
             warnings = warnings or result.get("warnings", [])
             summary = summarize_rows(rows)
@@ -193,7 +210,7 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         finally:
             try:
-                for temp_path in temp_csvs + temp_images:
+                for temp_path in temp_csvs + temp_long_plans + temp_images:
                     temp_path.unlink()
             except FileNotFoundError:
                 pass

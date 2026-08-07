@@ -1,11 +1,17 @@
 const dropzone = document.querySelector("#dropzone");
 const fileInput = document.querySelector("#fileInput");
 const chooseButton = document.querySelector("#chooseButton");
+const longPlanZone = document.querySelector("#longPlanZone");
+const longPlanInput = document.querySelector("#longPlanInput");
+const chooseLongPlanButton = document.querySelector("#chooseLongPlanButton");
 const chooseScreenshotButton = document.querySelector("#chooseScreenshotButton");
 const pasteScreenshotButton = document.querySelector("#pasteScreenshotButton");
 const selectedFile = document.querySelector("#selectedFile");
 const fileName = document.querySelector("#fileName");
 const clearButton = document.querySelector("#clearButton");
+const selectedLongPlans = document.querySelector("#selectedLongPlans");
+const longPlanName = document.querySelector("#longPlanName");
+const clearLongPlanButton = document.querySelector("#clearLongPlanButton");
 const processButton = document.querySelector("#processButton");
 const statusPill = document.querySelector("#statusPill");
 const message = document.querySelector("#message");
@@ -40,6 +46,7 @@ const pasteTarget = document.querySelector("#pasteTarget");
 const rateMetricsAsPercent = document.querySelector("#rateMetricsAsPercent");
 
 let currentFiles = [];
+let longPlanFiles = [];
 let screenshotFiles = [];
 let screenshotThumbUrls = [];
 let previewData = {};
@@ -91,6 +98,21 @@ function setFiles(files) {
   processButton.disabled = false;
   message.textContent = "文件已就绪，可以生成 XLSX。";
   setStatus("已选择文件");
+}
+
+function setLongPlans(files) {
+  longPlanFiles = [...files];
+  resetResult();
+  if (!longPlanFiles.length) {
+    selectedLongPlans.hidden = true;
+    longPlanName.textContent = "";
+    return;
+  }
+  selectedLongPlans.hidden = false;
+  longPlanName.textContent = longPlanFiles.length === 1
+    ? longPlanFiles[0].name
+    : `${longPlanFiles.length} 个长期计划：${longPlanFiles.map((file) => file.name).join("、")}`;
+  message.textContent = "长期计划已添加，会和订单分析 CSV 一起汇总。";
 }
 
 function setScreenshots(files) {
@@ -237,6 +259,7 @@ async function copyRows(key, includeHeader) {
 }
 
 chooseButton.addEventListener("click", () => fileInput.click());
+chooseLongPlanButton.addEventListener("click", () => longPlanInput.click());
 chooseScreenshotButton.addEventListener("click", () => screenshotInput.click());
 pasteScreenshotButton.addEventListener("click", async () => {
   pastePanel.hidden = false;
@@ -266,6 +289,10 @@ fileInput.addEventListener("change", () => {
   setFiles(fileInput.files);
 });
 
+longPlanInput.addEventListener("change", () => {
+  setLongPlans(longPlanInput.files);
+});
+
 screenshotInput.addEventListener("change", () => {
   addScreenshots(screenshotInput.files);
   screenshotInput.value = "";
@@ -274,6 +301,11 @@ screenshotInput.addEventListener("change", () => {
 clearButton.addEventListener("click", () => {
   fileInput.value = "";
   setFiles([]);
+});
+
+clearLongPlanButton.addEventListener("click", () => {
+  longPlanInput.value = "";
+  setLongPlans([]);
 });
 
 clearScreenshotButton.addEventListener("click", () => {
@@ -306,6 +338,32 @@ dropzone.addEventListener("drop", (event) => {
   }
   fileInput.files = event.dataTransfer.files;
   setFiles(files);
+});
+
+for (const eventName of ["dragenter", "dragover"]) {
+  longPlanZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    longPlanZone.classList.add("is-dragging");
+  });
+}
+
+for (const eventName of ["dragleave", "drop"]) {
+  longPlanZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    longPlanZone.classList.remove("is-dragging");
+  });
+}
+
+longPlanZone.addEventListener("drop", (event) => {
+  const files = [...event.dataTransfer.files];
+  const supported = [".csv", ".xlsx", ".xlsm"];
+  if (files.some((file) => !supported.some((suffix) => file.name.toLowerCase().endsWith(suffix)))) {
+    setStatus("文件格式不支持", "is-error");
+    message.textContent = "长期计划只支持 CSV 或 XLSX 文件。";
+    return;
+  }
+  longPlanInput.files = event.dataTransfer.files;
+  setLongPlans(files);
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -346,6 +404,7 @@ processButton.addEventListener("click", async () => {
   if (!currentFiles.length) return;
   const formData = new FormData();
   currentFiles.forEach((file) => formData.append("files", file));
+  longPlanFiles.forEach((file) => formData.append("longPlans", file));
   screenshotFiles.forEach((file) => formData.append("screenshots", file));
   if (outputNameInput.value.trim()) {
     formData.append("outputName", outputNameInput.value.trim());
