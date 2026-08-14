@@ -1,19 +1,16 @@
 const dropzone = document.querySelector("#dropzone");
 const fileInput = document.querySelector("#fileInput");
 const chooseButton = document.querySelector("#chooseButton");
-const longPlanZone = document.querySelector("#longPlanZone");
-const longPlanInput = document.querySelector("#longPlanInput");
-const chooseLongPlanButton = document.querySelector("#chooseLongPlanButton");
+const longPlanOcrInput = document.querySelector("#longPlanOcrInput");
+const ocrLongPlanButton = document.querySelector("#ocrLongPlanButton");
+const ocrClipboardButton = document.querySelector("#ocrClipboardButton");
 const chooseScreenshotButton = document.querySelector("#chooseScreenshotButton");
 const pasteScreenshotButton = document.querySelector("#pasteScreenshotButton");
 const selectedFile = document.querySelector("#selectedFile");
 const fileName = document.querySelector("#fileName");
 const clearButton = document.querySelector("#clearButton");
-const selectedLongPlans = document.querySelector("#selectedLongPlans");
-const longPlanName = document.querySelector("#longPlanName");
 const clearLongPlanButton = document.querySelector("#clearLongPlanButton");
 const processButton = document.querySelector("#processButton");
-const statusPill = document.querySelector("#statusPill");
 const message = document.querySelector("#message");
 const metrics = document.querySelector("#metrics");
 const rowsMetric = document.querySelector("#rowsMetric");
@@ -44,12 +41,14 @@ const screenshotZone = document.querySelector("#screenshotZone");
 const pastePanel = document.querySelector("#pastePanel");
 const pasteTarget = document.querySelector("#pasteTarget");
 const rateMetricsAsPercent = document.querySelector("#rateMetricsAsPercent");
+const longPlanPanel = document.querySelector(".long-plan-panel");
+const longPlanOcrStatus = document.querySelector("#longPlanOcrStatus");
 
 let currentFiles = [];
-let longPlanFiles = [];
 let screenshotFiles = [];
 let screenshotThumbUrls = [];
 let previewData = {};
+let activeOcrButton = null;
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
   style: "currency",
@@ -58,11 +57,6 @@ const moneyFormatter = new Intl.NumberFormat("zh-CN", {
 });
 
 const numberFormatter = new Intl.NumberFormat("zh-CN");
-
-function setStatus(text, mode = "") {
-  statusPill.textContent = text;
-  statusPill.className = `status-pill ${mode}`.trim();
-}
 
 function resetResult() {
   metrics.hidden = true;
@@ -88,31 +82,14 @@ function setFiles(files) {
     fileName.textContent = "";
     processButton.disabled = true;
     message.textContent = "";
-    setStatus("等待上传");
     return;
   }
   selectedFile.hidden = false;
   fileName.textContent = currentFiles.length === 1
     ? currentFiles[0].name
-    : `${currentFiles.length} 个 CSV：${currentFiles.map((file) => file.name).join("、")}`;
+    : `${currentFiles.length} 个表格：${currentFiles.map((file) => file.name).join("、")}`;
   processButton.disabled = false;
   message.textContent = "文件已就绪，可以生成 XLSX。";
-  setStatus("已选择文件");
-}
-
-function setLongPlans(files) {
-  longPlanFiles = [...files];
-  resetResult();
-  if (!longPlanFiles.length) {
-    selectedLongPlans.hidden = true;
-    longPlanName.textContent = "";
-    return;
-  }
-  selectedLongPlans.hidden = false;
-  longPlanName.textContent = longPlanFiles.length === 1
-    ? longPlanFiles[0].name
-    : `${longPlanFiles.length} 个长期计划：${longPlanFiles.map((file) => file.name).join("、")}`;
-  message.textContent = "长期计划已添加，会和订单分析 CSV 一起汇总。";
 }
 
 function setScreenshots(files) {
@@ -134,17 +111,114 @@ function setScreenshots(files) {
   screenshotThumbs.innerHTML = screenshotFiles.map((file, index) => `
     <div class="thumb-card">
       <img src="${screenshotThumbUrls[index]}" alt="${file.name}">
-      <span title="${file.name}">${file.name}</span>
+      <div class="thumb-meta">
+        <span title="${file.name}">${file.name}</span>
+        <button class="thumb-remove" data-remove-screenshot="${index}" type="button" aria-label="移除 ${file.name}">移除</button>
+      </div>
     </div>
   `).join("");
   screenshotThumbs.hidden = false;
 }
 
+function longPlanInputs() {
+  return [...document.querySelectorAll("[data-long-plan]")];
+}
+
+function longPlanRow() {
+  const row = {};
+  longPlanInputs().forEach((input) => {
+    const value = input.value.trim();
+    if (value) row[input.dataset.longPlan] = value;
+  });
+  return row;
+}
+
+function fillLongPlanRow(fields) {
+  longPlanInputs().forEach((input) => {
+    const value = fields[input.dataset.longPlan];
+    if (value !== undefined && value !== null && value !== "") input.value = value;
+  });
+  document.querySelector(".long-plan-panel").open = true;
+}
+
+function clearLongPlanRow() {
+  longPlanInputs().forEach((input) => {
+    input.value = "";
+  });
+  resetResult();
+  longPlanOcrStatus.textContent = "";
+  message.textContent = "长期计划数据行已清空。";
+}
+
 function addScreenshots(files) {
-  const images = [...files].filter((file) => file.type.startsWith("image/"));
+  const images = [...files].filter((file) => file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|tif|tiff|webp)$/i.test(file.name));
   if (!images.length) return;
   screenshotFiles = [...screenshotFiles, ...images];
   setScreenshots(screenshotFiles);
+}
+
+function setLongPlanOcrState(state, text = "", button = null) {
+  const isBusy = state === "busy";
+  longPlanPanel.setAttribute("aria-busy", String(isBusy));
+  longPlanOcrStatus.textContent = text;
+  longPlanOcrStatus.className = `inline-status${state ? ` is-${state}` : ""}`;
+  [ocrLongPlanButton, ocrClipboardButton, clearLongPlanButton].forEach((control) => {
+    control.disabled = isBusy;
+  });
+  if (activeOcrButton && activeOcrButton !== button) {
+    activeOcrButton.textContent = activeOcrButton.dataset.idleText;
+  }
+  activeOcrButton = isBusy ? button : null;
+  if (button) {
+    button.dataset.idleText ||= button.textContent;
+    button.textContent = isBusy ? "识别中..." : button.dataset.idleText;
+  }
+}
+
+async function recognizeLongPlanImage(file, button = null) {
+  const formData = new FormData();
+  formData.append("ocrImage", file);
+  setLongPlanOcrState("busy", "正在识别截图，请稍等。", button);
+  message.textContent = "正在识别长期计划截图。";
+  const response = await fetch("/api/ocr-long-plan", {
+    method: "POST",
+    body: formData,
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) {
+    const error = new Error(payload.error || "OCR 识别失败。");
+    error.code = payload.code || "";
+    error.hint = payload.hint || "";
+    error.installCommand = payload.installCommand || "";
+    throw error;
+  }
+  fillLongPlanRow(payload.fields || {});
+  resetResult();
+  setLongPlanOcrState("done", "识别完成，已预填长期计划数据行。");
+  message.textContent = "OCR 已预填长期计划数据行，请检查数字后再生成。";
+}
+
+function ocrErrorText(error) {
+  if (error.code !== "missing_tesseract") return error.message;
+  return [
+    error.message,
+    error.hint,
+    error.installCommand ? `解决命令：${error.installCommand}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+async function imageFromClipboard() {
+  if (!navigator.clipboard?.read) {
+    throw new Error("当前环境不支持直接读取剪切板图片。");
+  }
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    const imageType = item.types.find((type) => type.startsWith("image/"));
+    if (!imageType) continue;
+    const blob = await item.getType(imageType);
+    return new File([blob], `剪切板长期计划截图-${Date.now()}.png`, { type: imageType });
+  }
+  throw new Error("剪切板里没有图片。");
 }
 
 function formatSummary(summary) {
@@ -259,7 +333,6 @@ async function copyRows(key, includeHeader) {
 }
 
 chooseButton.addEventListener("click", () => fileInput.click());
-chooseLongPlanButton.addEventListener("click", () => longPlanInput.click());
 chooseScreenshotButton.addEventListener("click", () => screenshotInput.click());
 pasteScreenshotButton.addEventListener("click", async () => {
   pastePanel.hidden = false;
@@ -289,10 +362,6 @@ fileInput.addEventListener("change", () => {
   setFiles(fileInput.files);
 });
 
-longPlanInput.addEventListener("change", () => {
-  setLongPlans(longPlanInput.files);
-});
-
 screenshotInput.addEventListener("change", () => {
   addScreenshots(screenshotInput.files);
   screenshotInput.value = "";
@@ -304,14 +373,33 @@ clearButton.addEventListener("click", () => {
 });
 
 clearLongPlanButton.addEventListener("click", () => {
-  longPlanInput.value = "";
-  setLongPlans([]);
+  clearLongPlanRow();
+});
+
+longPlanInputs().forEach((input) => {
+  input.addEventListener("input", () => {
+    resetResult();
+    if (currentFiles.length) {
+      message.textContent = "长期计划数据行已更新，可以重新生成 XLSX。";
+    }
+  });
 });
 
 clearScreenshotButton.addEventListener("click", () => {
   screenshotInput.value = "";
   screenshotFiles = [];
   setScreenshots(screenshotFiles);
+});
+
+screenshotThumbs.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-screenshot]");
+  if (!button) return;
+  const index = Number(button.dataset.removeScreenshot);
+  if (!Number.isInteger(index)) return;
+  const [removed] = screenshotFiles.splice(index, 1);
+  resetResult();
+  setScreenshots(screenshotFiles);
+  message.textContent = removed ? `已移除截图：${removed.name}` : "截图已移除。";
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -331,39 +419,12 @@ for (const eventName of ["dragleave", "drop"]) {
 dropzone.addEventListener("drop", (event) => {
   const files = [...event.dataTransfer.files];
   if (!files.length) return;
-  if (files.some((file) => !file.name.toLowerCase().endsWith(".csv"))) {
-    setStatus("文件格式不支持", "is-error");
-    message.textContent = "拖入区域只接收 CSV 文件；消耗截图请用下方控件选择。";
+  if (files.some((file) => !/\.(csv|tsv|txt|xlsx|xlsm|xls)$/i.test(file.name))) {
+    message.textContent = "拖入区域只接收表格文件；消耗截图请用右侧控件选择。";
     return;
   }
   fileInput.files = event.dataTransfer.files;
   setFiles(files);
-});
-
-for (const eventName of ["dragenter", "dragover"]) {
-  longPlanZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    longPlanZone.classList.add("is-dragging");
-  });
-}
-
-for (const eventName of ["dragleave", "drop"]) {
-  longPlanZone.addEventListener(eventName, (event) => {
-    event.preventDefault();
-    longPlanZone.classList.remove("is-dragging");
-  });
-}
-
-longPlanZone.addEventListener("drop", (event) => {
-  const files = [...event.dataTransfer.files];
-  const supported = [".csv", ".xlsx", ".xlsm"];
-  if (files.some((file) => !supported.some((suffix) => file.name.toLowerCase().endsWith(suffix)))) {
-    setStatus("文件格式不支持", "is-error");
-    message.textContent = "长期计划只支持 CSV 或 XLSX 文件。";
-    return;
-  }
-  longPlanInput.files = event.dataTransfer.files;
-  setLongPlans(files);
 });
 
 for (const eventName of ["dragenter", "dragover"]) {
@@ -382,6 +443,35 @@ for (const eventName of ["dragleave", "drop"]) {
 
 screenshotZone.addEventListener("drop", (event) => {
   addScreenshots(event.dataTransfer.files);
+});
+
+ocrLongPlanButton.addEventListener("click", () => longPlanOcrInput.click());
+document.querySelector(".long-plan-heading .button-row").addEventListener("click", (event) => {
+  event.stopPropagation();
+});
+
+longPlanOcrInput.addEventListener("change", async () => {
+  const [file] = longPlanOcrInput.files;
+  longPlanOcrInput.value = "";
+  if (!file) return;
+  try {
+    await recognizeLongPlanImage(file, ocrLongPlanButton);
+  } catch (error) {
+    const text = ocrErrorText(error);
+    setLongPlanOcrState("error", text);
+    message.textContent = text;
+  }
+});
+
+ocrClipboardButton.addEventListener("click", async () => {
+  try {
+    setLongPlanOcrState("busy", "正在读取剪切板截图。", ocrClipboardButton);
+    await recognizeLongPlanImage(await imageFromClipboard(), ocrClipboardButton);
+  } catch (error) {
+    const text = ocrErrorText(error);
+    setLongPlanOcrState("error", text);
+    message.textContent = text;
+  }
 });
 
 function handlePaste(event) {
@@ -404,8 +494,8 @@ processButton.addEventListener("click", async () => {
   if (!currentFiles.length) return;
   const formData = new FormData();
   currentFiles.forEach((file) => formData.append("files", file));
-  longPlanFiles.forEach((file) => formData.append("longPlans", file));
   screenshotFiles.forEach((file) => formData.append("screenshots", file));
+  formData.append("longPlanRow", JSON.stringify(longPlanRow()));
   if (outputNameInput.value.trim()) {
     formData.append("outputName", outputNameInput.value.trim());
   }
@@ -417,7 +507,6 @@ processButton.addEventListener("click", async () => {
 
   processButton.disabled = true;
   resetResult();
-  setStatus("正在处理", "is-working");
   message.textContent = "正在生成三表结构，请稍等。";
 
   try {
@@ -450,10 +539,8 @@ processButton.addEventListener("click", async () => {
       warningsList.innerHTML = warnings.map((warning) => `<li>${warning}</li>`).join("");
       warningsCard.hidden = false;
     }
-    setStatus("处理完成", "is-done");
     message.textContent = "XLSX 已生成，数据汇总已按当前面板设置处理。";
   } catch (error) {
-    setStatus("处理失败", "is-error");
     message.textContent = error.message;
   } finally {
     processButton.disabled = !currentFiles.length;

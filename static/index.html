@@ -11,19 +11,7 @@
       <section class="workspace">
         <div class="topbar">
           <div>
-            <p class="eyebrow">Live Ads Workbook</p>
             <h1>投放数据处理面板</h1>
-          </div>
-          <div class="status-cluster">
-            <div class="status-pill" id="statusPill">等待上传</div>
-            <div class="status-pill info-pill" tabindex="0">
-              输出结构
-              <div class="structure-popover">
-                <div><strong>Sheet 1</strong><span>直播投放数据源</span></div>
-                <div><strong>Sheet 2</strong><span>数据汇总</span></div>
-                <div><strong>Sheet 3</strong><span>结算整理表</span></div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -31,23 +19,15 @@
           <div class="upload-panel">
             <div class="upload-grid">
               <div class="dropzone" id="dropzone">
-                <input id="fileInput" type="file" accept=".csv,text/csv" multiple />
-                <div class="file-icon">CSV</div>
-                <h2>导入订单分析 CSV</h2>
-                <p id="fileHint">拖入一个或多个 CSV，或点击选择文件</p>
-                <button class="secondary-button" id="chooseButton" type="button">选择 CSV</button>
-              </div>
-
-              <div class="dropzone" id="longPlanZone">
-                <input id="longPlanInput" type="file" accept=".csv,text/csv,.xlsx,.xlsm" multiple />
-                <div class="file-icon">PLAN</div>
-                <h2>添加长期计划</h2>
-                <p id="longPlanHint">可选，支持长期计划 CSV 或 XLSX</p>
-                <button class="secondary-button" id="chooseLongPlanButton" type="button">选择长期计划</button>
+                <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple />
+                <div class="file-icon">XLS</div>
+                <h2>导入订单分析表</h2>
+                <p id="fileHint">拖入一个或多个表格，或点击选择文件</p>
+                <button class="secondary-button" id="chooseButton" type="button">选择表格</button>
               </div>
 
               <div class="dropzone screenshot-zone" id="screenshotZone">
-                <input id="screenshotInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+                <input id="screenshotInput" type="file" accept="image/*" multiple />
                 <div class="file-icon">IMG</div>
                 <h2>导入消耗截图</h2>
                 <p id="screenshotHint">可选，支持选择、拖入或粘贴截图</p>
@@ -57,6 +37,106 @@
                 </div>
               </div>
             </div>
+
+            <details class="long-plan-panel">
+              <summary class="long-plan-heading">
+                <div>
+                  <span class="label">长期计划数据行</span>
+                  <strong>可直接填写，也可从截图自动识别</strong>
+                  <span class="inline-status" id="longPlanOcrStatus" role="status" aria-live="polite"></span>
+                </div>
+                <div class="button-row compact-row">
+                  <input id="longPlanOcrInput" type="file" accept="image/*" hidden />
+                  <button class="secondary-button" id="ocrLongPlanButton" type="button">选择截图识别</button>
+                  <button class="secondary-button" id="ocrClipboardButton" type="button">粘贴截图识别</button>
+                  <button class="secondary-button" id="clearLongPlanButton" type="button">清空</button>
+                </div>
+              </summary>
+              <div class="long-plan-grid">
+                <label>消耗总金额<input data-long-plan="消耗总金额" inputmode="decimal" placeholder="1416.5" /></label>
+                <label>曝光总人数<input data-long-plan="曝光总人数" inputmode="numeric" placeholder="4700" /></label>
+                <label>进入总人数<input data-long-plan="进入总人数" inputmode="numeric" placeholder="1395" /></label>
+                <label>点赞总次数<input data-long-plan="点赞总次数" inputmode="numeric" placeholder="12" /></label>
+                <label>评论总次数<input data-long-plan="评论总次数" inputmode="numeric" placeholder="55" /></label>
+                <label>新增总关注<input data-long-plan="新增总关注" inputmode="numeric" placeholder="24" /></label>
+                <label>成交 GMV<input data-long-plan="成交GMV" inputmode="decimal" placeholder="5553.55" /></label>
+                <label>成交订单数<input data-long-plan="成交订单数" inputmode="numeric" placeholder="23" /></label>
+                <label>下单 GMV<input data-long-plan="下单GMV" inputmode="decimal" placeholder="6057.54" /></label>
+                <label>下单订单数<input data-long-plan="下单订单数" inputmode="numeric" placeholder="26" /></label>
+              </div>
+            </details>
+
+            <details class="settings-panel">
+              <summary>功能设置</summary>
+              <section class="options-panel">
+                <div class="option-item">
+                  <div>
+                    <strong>数据情况表转置</strong>
+                    <span>指标纵向排列，投放目标横向对比</span>
+                  </div>
+                  <label class="switch">
+                    <input id="transposeSummary" type="checkbox" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="option-item">
+                  <div>
+                    <strong>使用千分位</strong>
+                    <span>例如 32,843、1,228.90</span>
+                  </div>
+                  <label class="switch">
+                    <input id="useThousands" type="checkbox" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="option-item">
+                  <div>
+                    <strong>删除全 0 列</strong>
+                    <span>分类列没有任何数据时不导出</span>
+                  </div>
+                  <label class="switch">
+                    <input id="removeZeroColumns" type="checkbox" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="option-item">
+                  <div>
+                    <strong>交叉高亮</strong>
+                    <span>点击单元格定位对应行列</span>
+                  </div>
+                  <label class="switch">
+                    <input id="crossHighlight" type="checkbox" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="option-item">
+                  <div>
+                    <strong>占比显示百分数</strong>
+                    <span>进入率、新增/场观、评论/场观</span>
+                  </div>
+                  <label class="switch">
+                    <input id="rateMetricsAsPercent" type="checkbox" checked />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="option-item option-wide">
+                  <div>
+                    <strong>小数位</strong>
+                    <span>比例字段统一输出为小数</span>
+                  </div>
+                  <div class="segmented" role="group" aria-label="小数位">
+                    <label>
+                      <input type="radio" name="decimalMode" value="fixed2" checked />
+                      <span>保留两位</span>
+                    </label>
+                    <label>
+                      <input type="radio" name="decimalMode" value="full" />
+                      <span>展开小数</span>
+                    </label>
+                  </div>
+                </div>
+              </section>
+            </details>
 
             <div class="paste-panel" id="pastePanel" hidden>
               <div>
@@ -70,18 +150,10 @@
 
             <div class="selected-file" id="selectedFile" hidden>
               <div>
-                <span class="label">当前 CSV</span>
+                <span class="label">当前表格</span>
                 <strong id="fileName"></strong>
               </div>
               <button class="text-button" id="clearButton" type="button">移除</button>
-            </div>
-
-            <div class="selected-file" id="selectedLongPlans" hidden>
-              <div>
-                <span class="label">当前长期计划</span>
-                <strong id="longPlanName"></strong>
-              </div>
-              <button class="text-button" id="clearLongPlanButton" type="button">移除</button>
             </div>
 
             <div class="selected-file" id="selectedScreenshots" hidden>
@@ -101,75 +173,6 @@
             <button class="primary-button" id="processButton" type="button" disabled>
               生成 XLSX
             </button>
-          </div>
-        </section>
-
-        <section class="options-panel">
-          <div class="option-item">
-            <div>
-              <strong>数据情况表转置</strong>
-              <span>指标纵向排列，投放目标横向对比</span>
-            </div>
-            <label class="switch">
-              <input id="transposeSummary" type="checkbox" checked />
-              <span></span>
-            </label>
-          </div>
-          <div class="option-item">
-            <div>
-              <strong>使用千分位</strong>
-              <span>例如 32,843、1,228.90</span>
-            </div>
-            <label class="switch">
-              <input id="useThousands" type="checkbox" checked />
-              <span></span>
-            </label>
-          </div>
-          <div class="option-item">
-            <div>
-              <strong>删除全 0 列</strong>
-              <span>分类列没有任何数据时不导出</span>
-            </div>
-            <label class="switch">
-              <input id="removeZeroColumns" type="checkbox" checked />
-              <span></span>
-            </label>
-          </div>
-          <div class="option-item">
-            <div>
-              <strong>交叉高亮</strong>
-              <span>点击单元格定位对应行列</span>
-            </div>
-            <label class="switch">
-              <input id="crossHighlight" type="checkbox" checked />
-              <span></span>
-            </label>
-          </div>
-          <div class="option-item">
-            <div>
-              <strong>占比显示百分数</strong>
-              <span>进入率、新增/场观、评论/场观</span>
-            </div>
-            <label class="switch">
-              <input id="rateMetricsAsPercent" type="checkbox" checked />
-              <span></span>
-            </label>
-          </div>
-          <div class="option-item option-wide">
-            <div>
-              <strong>小数位</strong>
-              <span>比例字段统一输出为小数</span>
-            </div>
-            <div class="segmented" role="group" aria-label="小数位">
-              <label>
-                <input type="radio" name="decimalMode" value="fixed2" checked />
-                <span>保留两位</span>
-              </label>
-              <label>
-                <input type="radio" name="decimalMode" value="full" />
-                <span>展开小数</span>
-              </label>
-            </div>
           </div>
         </section>
 

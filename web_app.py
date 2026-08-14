@@ -3,7 +3,10 @@ import cgi
 import json
 import mimetypes
 import os
+import re
+import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -15,12 +18,14 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from openpyxl import load_workbook
+from PIL import Image
 
 from process_live_ads import (
     build_workbook,
     default_output_stem,
     read_csv_files,
     read_long_plan_files,
+    rows_from_long_plan_values,
     to_number,
     validate_inputs,
     validate_long_plan_inputs,
@@ -36,6 +41,7 @@ def app_base_dir():
 APP_DIR = app_base_dir()
 OUTPUT_DIR = Path(tempfile.gettempdir()) / "live_ads_panel_outputs"
 STATIC_DIR = APP_DIR / "static"
+TABLE_SUFFIXES = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".xls"}
 
 
 def summarize_rows(rows):
@@ -79,6 +85,33 @@ def form_files(form, name):
     return [item for item in files if getattr(item, "filename", "")]
 
 
+def save_uploaded_table(upload, prefix):
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in TABLE_SUFFIXES:
+        raise ValueError(f"{Path(upload.filename).name} 不是支持的表格文件。")
+    temp_path = Path(tempfile.gettempdir()) / f"{prefix}{suffix}"
+    with temp_path.open("wb") as f:
+        f.write(upload.file.read())
+    return temp_path
+
+
+def save_uploaded_image(upload, prefix):
+    temp_raw = Path(tempfile.gettempdir()) / f"{prefix}.upload"
+    temp_png = Path(tempfile.gettempdir()) / f"{prefix}.png"
+    with temp_raw.open("wb") as f:
+        f.write(upload.file.read())
+    try:
+        Image.open(temp_raw).convert("RGB").save(temp_png)
+    except Exception as exc:
+        raise ValueError(f"{Path(upload.filename).name} 不是可识别的图片文件。") from exc
+    finally:
+        try:
+            temp_raw.unlink()
+        except FileNotFoundError:
+            pass
+    return temp_png
+
+
 def sheet_preview(workbook_path, sheet_name):
     wb = load_workbook(workbook_path, data_only=True)
     ws = wb[sheet_name]
@@ -86,6 +119,97 @@ def sheet_preview(workbook_path, sheet_name):
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column, values_only=True):
         rows.append(["" if value is None else value for value in row])
     return rows
+
+
+def ocr_number_after(text, labels):
+    for label in labels:
+        pattern = rf"{re.escape(label)}[\s:：¥￥]*([0-9][0-9,]*(?:\.[0-9]+)?)"
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def ocr_numbers(line):
+    return re.findall(r"[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", line)
+
+
+def ocr_next_numbers(lines, required_labels):
+    for index, line in enumerate(lines[:-1]):
+        if all(label in line for label in required_labels):
+            return ocr_numbers(lines[index + 1])
+    return []
+
+
+def parse_long_plan_ocr_text(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    result = {
+        "消耗总金额": ocr_number_after(text, ["消耗总金额", "直播间消耗", "直播间消耗耗"]),
+        "曝光总人数": ocr_number_after(text, ["曝光总人数", "直播间曝光人数"]),
+        "进入总人数": ocr_number_after(text, ["进入总人数", "直播间观看人数"]),
+        "点赞总次数": ocr_number_after(text, ["点赞总次数", "直播间点赞次数"]),
+        "评论总次数": ocr_number_after(text, ["评论总次数", "直播间评论次数"]),
+        "新增总关注": ocr_number_after(text, ["新增总关注", "新增总关注数", "新增总粉丝"]),
+        "成交GMV": ocr_number_after(text, ["当场成交GMV", "直接成交GMV", "净成交金额", "成交GMV"]),
+        "成交订单数": ocr_number_after(text, ["当场成交订单数", "直接成交订单数", "净成交订单数", "成交订单数"]),
+        "下单GMV": ocr_number_after(text, ["当场下单GMV", "直接下单GMV", "下单GMV"]),
+        "下单订单数": ocr_number_after(text, ["当场下单订单数", "直接下单订单数", "下单订单数"]),
+    }
+    live_numbers = ocr_next_numbers(lines, ["消耗总金额", "曝光总人数", "新增总关注"])
+    if len(live_numbers) >= 6:
+        result.update(
+            {
+                "消耗总金额": live_numbers[0],
+                "曝光总人数": live_numbers[1],
+                "进入总人数": live_numbers[2],
+                "点赞总次数": live_numbers[3],
+                "评论总次数": live_numbers[4],
+                "新增总关注": live_numbers[5],
+            }
+        )
+    deal_numbers = ocr_next_numbers(lines, ["成交ROI", "当场成交GMV", "当场成交订单数"])
+    if len(deal_numbers) >= 6:
+        result["成交GMV"] = deal_numbers[2]
+        result["成交订单数"] = deal_numbers[4]
+    order_numbers = ocr_next_numbers(lines, ["净成交订单数", "当场下单GMV", "当场下单订单数"])
+    if len(order_numbers) >= 6:
+        result["下单GMV"] = order_numbers[3]
+        result["下单订单数"] = order_numbers[5]
+    return result
+
+
+def tesseract_path():
+    bundled = APP_DIR / "ocr" / ("tesseract.exe" if sys.platform == "win32" else "tesseract")
+    if bundled.exists():
+        return str(bundled)
+    return shutil.which("tesseract")
+
+
+def tesseract_env():
+    env = os.environ.copy()
+    tessdata = APP_DIR / "ocr" / "tessdata"
+    if tessdata.exists():
+        env["TESSDATA_PREFIX"] = str(tessdata)
+    return env
+
+
+def missing_tesseract_payload():
+    if sys.platform == "darwin":
+        command = "brew install tesseract tesseract-lang"
+        hint = "当前 Mac 还不能自动识别截图。你可以先手动填写；如果要启用截图识别，安装后重启这个面板即可。"
+    elif sys.platform == "win32":
+        command = "把 tesseract.exe 放到 ocr/tesseract.exe，或安装 Tesseract 后加入 PATH"
+        hint = "当前 Windows 还不能自动识别截图。你可以先手动填写；正式桌面版可以把识别组件一起打包。"
+    else:
+        command = "安装 tesseract-ocr 和中文语言包，例如 apt install tesseract-ocr tesseract-ocr-chi-sim"
+        hint = "当前电脑还不能自动识别截图。你可以先手动填写；安装识别组件和中文语言包后重启面板即可。"
+    return {
+        "ok": False,
+        "code": "missing_tesseract",
+        "error": "截图识别组件未安装。",
+        "hint": hint,
+        "installCommand": command,
+    }
 
 
 class AppHandler(BaseHTTPRequestHandler):
@@ -109,13 +233,17 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/process":
+        path = urlparse(self.path).path
+        if path == "/api/ocr-long-plan":
+            self.handle_ocr_long_plan()
+            return
+        if path != "/api/process":
             self.send_error(HTTPStatus.NOT_FOUND, "接口不存在")
             return
 
         content_type = self.headers.get("content-type", "")
         if "multipart/form-data" not in content_type:
-            self.send_json({"ok": False, "error": "请上传 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
+            self.send_json({"ok": False, "error": "请上传表格文件。"}, HTTPStatus.BAD_REQUEST)
             return
 
         form = cgi.FieldStorage(
@@ -131,11 +259,6 @@ class AppHandler(BaseHTTPRequestHandler):
         if not uploads:
             self.send_json({"ok": False, "error": "没有收到文件。"}, HTTPStatus.BAD_REQUEST)
             return
-
-        for upload in uploads:
-            if not Path(upload.filename).name.lower().endswith(".csv"):
-                self.send_json({"ok": False, "error": "目前只支持 CSV 文件。"}, HTTPStatus.BAD_REQUEST)
-                return
 
         job_id = uuid.uuid4().hex
         job_dir = OUTPUT_DIR / job_id
@@ -154,35 +277,24 @@ class AppHandler(BaseHTTPRequestHandler):
 
         try:
             for idx, upload in enumerate(uploads, 1):
-                temp_csv = Path(tempfile.gettempdir()) / f"live_ads_{job_id}_{idx}.csv"
-                with temp_csv.open("wb") as f:
-                    f.write(upload.file.read())
-                temp_csvs.append(temp_csv)
+                temp_csvs.append(save_uploaded_table(upload, f"live_ads_{job_id}_{idx}"))
             long_plans = form_files(form, "longPlans")
             for idx, plan in enumerate(long_plans, 1):
-                suffix = Path(plan.filename).suffix.lower()
-                if suffix not in {".csv", ".xlsx", ".xlsm"}:
-                    raise ValueError("长期计划只支持 CSV 或 XLSX 文件。")
-                temp_plan = Path(tempfile.gettempdir()) / f"live_ads_{job_id}_long_plan_{idx}{suffix}"
-                with temp_plan.open("wb") as f:
-                    f.write(plan.file.read())
-                temp_long_plans.append(temp_plan)
+                temp_long_plans.append(save_uploaded_table(plan, f"live_ads_{job_id}_long_plan_{idx}"))
             screenshots = form_files(form, "screenshots")
             for idx, screenshot in enumerate(screenshots, 1):
-                suffix = Path(screenshot.filename).suffix.lower() or ".png"
-                temp_image = Path(tempfile.gettempdir()) / f"live_ads_{job_id}_screenshot_{idx}{suffix}"
-                with temp_image.open("wb") as f:
-                    f.write(screenshot.file.read())
-                temp_images.append(temp_image)
+                temp_images.append(save_uploaded_image(screenshot, f"live_ads_{job_id}_screenshot_{idx}"))
 
             header_sets, rows = read_csv_files(temp_csvs)
             if not rows:
-                raise ValueError("CSV 没有数据行。")
+                raise ValueError("表格没有数据行。")
             warnings = validate_inputs(header_sets, rows)
             if temp_long_plans:
                 long_header_sets, long_rows = read_long_plan_files(temp_long_plans)
                 warnings.extend(validate_long_plan_inputs(long_header_sets))
                 rows.extend(long_rows)
+            manual_long_rows = rows_from_long_plan_values(json.loads(form.getfirst("longPlanRow", "{}")))
+            rows.extend(manual_long_rows)
             output_name = safe_xlsx_name(custom_output_name or default_output_stem(rows))
             output_path = job_dir / output_name
             combined_image_name = f"{Path(output_name).stem}_拼接图.png"
@@ -198,6 +310,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 combined_image_path=combined_image_path,
                 rate_metrics_as_percent=rate_metrics_as_percent,
                 long_plan_paths=temp_long_plans,
+                long_plan_rows=manual_long_rows,
             )
             warnings = warnings or result.get("warnings", [])
             summary = summarize_rows(rows)
@@ -227,6 +340,52 @@ class AppHandler(BaseHTTPRequestHandler):
                 "combinedImageName": combined_image_name if result.get("combined_image") else "",
             }
         )
+
+    def handle_ocr_long_plan(self):
+        tesseract = tesseract_path()
+        if not tesseract:
+            self.send_json(missing_tesseract_payload(), HTTPStatus.BAD_REQUEST)
+            return
+        content_type = self.headers.get("content-type", "")
+        if "multipart/form-data" not in content_type:
+            self.send_json({"ok": False, "error": "请上传长期计划截图。"}, HTTPStatus.BAD_REQUEST)
+            return
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": content_type,
+                "CONTENT_LENGTH": self.headers.get("content-length", "0"),
+            },
+        )
+        images = form_files(form, "ocrImage")
+        if not images:
+            self.send_json({"ok": False, "error": "没有收到截图。"}, HTTPStatus.BAD_REQUEST)
+            return
+        image = images[0]
+        temp_image = None
+        try:
+            temp_image = save_uploaded_image(image, f"live_ads_ocr_{uuid.uuid4().hex}")
+            result = subprocess.run(
+                [tesseract, str(temp_image), "stdout", "-l", "chi_sim+eng", "--psm", "6"],
+                check=False,
+                capture_output=True,
+                env=tesseract_env(),
+                text=True,
+                timeout=20,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or "OCR 识别失败。")
+            self.send_json({"ok": True, "fields": parse_long_plan_ocr_text(result.stdout), "text": result.stdout})
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        finally:
+            try:
+                if temp_image:
+                    temp_image.unlink()
+            except FileNotFoundError:
+                pass
 
     def serve_file(self, path, content_type=None):
         if not path.exists() or not path.is_file():

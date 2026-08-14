@@ -2,6 +2,9 @@
 import argparse
 import csv
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -57,13 +60,17 @@ LONG_PLAN_ALIASES = {
     "当场成交GMV": ("总成交金额", 1),
     "直接成交GMV": ("总成交金额", 1),
     "净成交金额": ("总成交金额", 1),
+    "成交GMV": ("总成交金额", 1),
     "当场成交订单数": ("总成交订单数", 1),
     "直接成交订单数": ("总成交订单数", 1),
     "净成交订单数": ("总成交订单数", 1),
+    "成交订单数": ("总成交订单数", 1),
     "当场下单GMV": ("总下单金额", 1),
     "直接下单GMV": ("总下单金额", 1),
+    "下单GMV": ("总下单金额", 1),
     "当场下单订单数": ("总下单订单数", 1),
     "直接下单订单数": ("总下单订单数", 1),
+    "下单订单数": ("总下单订单数", 1),
 }
 
 NUMERIC_HEADERS = {
@@ -165,29 +172,75 @@ def normalize_date_text(value):
     return text
 
 
+def normalize_source_row(raw):
+    normalized = {}
+    for key, value in raw.items():
+        header = INPUT_ALIASES.get(clean_header(key), clean_header(key))
+        normalized[header] = value
+    return normalized
+
+
+def rows_from_table_values(values):
+    if not values:
+        return [], []
+    raw_headers = [clean_header(header) for header in values[0]]
+    rows = []
+    for value_row in values[1:]:
+        if not any(str(value or "").strip() for value in value_row):
+            continue
+        raw = {raw_headers[idx]: value for idx, value in enumerate(value_row) if idx < len(raw_headers)}
+        rows.append(normalize_source_row(raw))
+    return raw_headers, rows
+
+
+def convert_xls_to_xlsx(input_path):
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        raise ValueError(f"{Path(input_path).name} 是旧版 XLS，需要本机安装 LibreOffice 才能自动转换。")
+    output_dir = Path(tempfile.mkdtemp(prefix="live_ads_xls_"))
+    subprocess.run(
+        [soffice, "--headless", "--convert-to", "xlsx", "--outdir", str(output_dir), str(input_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    converted = output_dir / f"{Path(input_path).stem}.xlsx"
+    if not converted.exists():
+        raise ValueError(f"{Path(input_path).name} 自动转换失败。")
+    return converted
+
+
 def read_csv_rows(input_path):
-    return read_csv_file(input_path)[1]
+    return read_table_file(input_path)[1]
 
 
 def read_csv_file(input_path):
-    with Path(input_path).open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        raw_headers = [clean_header(header) for header in (reader.fieldnames or [])]
-        rows = []
-        for raw in reader:
-            normalized = {}
-            for key, value in raw.items():
-                header = INPUT_ALIASES.get(clean_header(key), clean_header(key))
-                normalized[header] = value
-            rows.append(normalized)
-    return raw_headers, rows
+    return read_table_file(input_path)
+
+
+def read_table_file(input_path):
+    path = Path(input_path)
+    suffix = path.suffix.lower()
+    if suffix in {".csv", ".tsv", ".txt"}:
+        dialect = "excel-tab" if suffix == ".tsv" else "excel"
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f, dialect=dialect)
+            raw_headers = [clean_header(header) for header in (reader.fieldnames or [])]
+            return raw_headers, [normalize_source_row(raw) for raw in reader]
+    if suffix in {".xlsx", ".xlsm", ".xls"}:
+        if suffix == ".xls":
+            path = convert_xls_to_xlsx(path)
+        wb = load_workbook(path, data_only=True, read_only=True)
+        ws = wb.active
+        return rows_from_table_values(list(ws.iter_rows(values_only=True)))
+    raise ValueError(f"{path.name} 不是支持的表格文件。")
 
 
 def read_csv_files(input_paths):
     all_rows = []
     header_sets = []
     for input_path in input_paths:
-        raw_headers, rows = read_csv_file(input_path)
+        raw_headers, rows = read_table_file(input_path)
         header_sets.append((Path(input_path).name, raw_headers))
         all_rows.extend(rows)
     return header_sets, all_rows
@@ -207,6 +260,14 @@ def row_from_long_plan(raw, filename):
             source_header, multiplier = target
             row[source_header] = to_number(value) * multiplier
     return row
+
+
+def rows_from_long_plan_values(values):
+    if not values:
+        return []
+    row = row_from_long_plan(values, "手动长期计划")
+    numeric_total = sum(to_number(row.get(header)) for header in NUMERIC_HEADERS)
+    return [row] if numeric_total else []
 
 
 def read_long_plan_file(input_path):
@@ -257,7 +318,7 @@ def validate_inputs(header_sets, rows):
         for filename, headers in header_sets[1:]:
             normalized = [INPUT_ALIASES.get(header, header) for header in headers]
             if normalized != first_headers:
-                warnings.append(f"{filename} 的表头顺序或字段与第一张 CSV 不一致。")
+                warnings.append(f"{filename} 的表头顺序或字段与第一张表格不一致。")
     anchors = sorted({str(row.get("加热主播", "")).strip() for row in rows if str(row.get("加热主播", "")).strip()})
     if len(anchors) > 1:
         warnings.append(f"检测到多个加热主播：{'、'.join(anchors)}。请确认是否应合并处理。")
@@ -876,6 +937,7 @@ def build_workbook(
     combined_image_path=None,
     rate_metrics_as_percent=True,
     long_plan_paths=None,
+    long_plan_rows=None,
 ):
     csv_paths = [csv_path] if isinstance(csv_path, (str, Path)) else list(csv_path)
     header_sets, rows = read_csv_files(csv_paths)
@@ -884,6 +946,8 @@ def build_workbook(
         long_header_sets, long_rows = read_long_plan_files(long_plan_paths)
         warnings.extend(validate_long_plan_inputs(long_header_sets))
         rows.extend(long_rows)
+    if long_plan_rows:
+        rows.extend(long_plan_rows)
     aggregates = aggregate_rows(rows)
     first_date = (
         normalize_date_text(rows[0].get("加热开始时间", ""))
@@ -917,11 +981,11 @@ def build_workbook(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="将直播投放 CSV 转换为三表结构 XLSX。")
-    parser.add_argument("csv", nargs="+", help="输入 CSV 文件路径，可传多个")
+    parser = argparse.ArgumentParser(description="将直播投放表格转换为三表结构 XLSX。")
+    parser.add_argument("csv", nargs="+", help="输入表格文件路径，可传多个")
     parser.add_argument("-o", "--output", help="输出 XLSX 文件路径")
     parser.add_argument("--image", action="append", default=[], help="插入到数据汇总旁边的截图路径，可重复")
-    parser.add_argument("--long-plan", action="append", default=[], help="长期计划 CSV/XLSX 路径，可重复")
+    parser.add_argument("--long-plan", action="append", default=[], help="长期计划表格路径，可重复")
     parser.add_argument("--no-thousands", action="store_true", help="数字不使用千分位")
     parser.add_argument("--decimal-mode", choices=["fixed2", "full"], default="fixed2", help="小数格式")
     parser.add_argument("--no-transpose-summary", action="store_true", help="数据情况横向不转置")

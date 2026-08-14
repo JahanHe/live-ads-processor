@@ -106,7 +106,9 @@ async function createWindow() {
     height: 860,
     minWidth: 1080,
     minHeight: 720,
-    title: "直播投放处理器",
+    title: "",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: { x: 16, y: 16 },
     backgroundColor: "#faf9f5",
     autoHideMenuBar: true,
     webPreferences: {

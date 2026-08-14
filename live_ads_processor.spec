@@ -1,16 +1,30 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from PyInstaller.utils.hooks import collect_submodules
+from pathlib import Path
+import shutil
 
 
 APP_NAME = "直播投放处理器后端"
+
+datas = [("static", "static")]
+tesseract = shutil.which("tesseract")
+if tesseract:
+    datas.append((tesseract, "ocr"))
+for tessdata_dir in (Path("/opt/homebrew/share/tessdata"), Path("/usr/local/share/tessdata")):
+    if tessdata_dir.exists():
+        for lang in ("chi_sim.traineddata", "eng.traineddata", "osd.traineddata"):
+            traineddata = tessdata_dir / lang
+            if traineddata.exists():
+                datas.append((str(traineddata), "ocr/tessdata"))
+        break
 
 
 a = Analysis(
     ["web_app.py"],
     pathex=[],
     binaries=[],
-    datas=[("static", "static")],
+    datas=datas,
     hiddenimports=collect_submodules("PIL"),
     hookspath=[],
     hooksconfig={},

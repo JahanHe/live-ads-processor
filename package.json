@@ -1,6 +1,6 @@
 {
   "name": "live-ads-processor",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "直播投放处理器桌面版",
   "main": "electron/main.js",
   "private": true,
