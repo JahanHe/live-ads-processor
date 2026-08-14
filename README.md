@@ -1,8 +1,8 @@
 # 直播投放处理器
 
-本地网页工具/桌面应用：上传订单分析 CSV，生成三表结构 XLSX。
+本地网页工具/桌面应用：上传订单分析表，生成三表结构 XLSX。
 
-支持额外添加长期计划 CSV/XLSX。长期计划会被转换成 `直播投放数据源` 的兼容数据行，和标准订单 CSV 一起参与 `数据汇总` 与 `结算整理表` 计算。
+支持额外添加长期计划 CSV/XLSX，也支持从长期计划截图本地 OCR 预填数据。长期计划会被转换成 `直播投放数据源` 的兼容数据行，和标准订单表一起参与 `数据汇总` 与 `结算整理表` 计算。
 
 ## 启动
 
@@ -43,7 +43,7 @@ pip install -r requirements.txt
 - 直播间效果：`消耗总金额`、`直播间消耗`、`曝光总人数`、`进入总人数`、`点赞总次数`、`评论总次数`、`新增总关注`
 - 电商效果：`当场成交GMV`、`直接成交GMV`、`净成交金额`、`当场成交订单数`、`直接成交订单数`、`净成交订单数`、`当场下单GMV`、`直接下单GMV`、`当场下单订单数`、`直接下单订单数`
 
-截图仍作为消耗截图插入和拼接，不参与数字识别。
+长期计划截图可通过本地 OCR 预填上面的字段；识别结果只是预填，生成前仍可手动修改。消耗截图仍会插入 XLSX，并可生成/复制拼接图。
 
 ## Windows 桌面版 EXE
 
@@ -56,7 +56,7 @@ https://github.com/JahanHe/live-ads-processor/releases
 Windows 用户下载：
 
 ```text
-live-ads-processor-windows-v2.3.2.exe
+live-ads-processor-windows-v2.3.3.exe
 ```
 
 详细步骤见：
@@ -76,7 +76,7 @@ https://github.com/JahanHe/live-ads-processor/releases
 M 系列 Mac 用户下载：
 
 ```text
-live-ads-processor-mac-arm64-v2.3.2.dmg
+live-ads-processor-mac-arm64-v2.3.3.dmg
 ```
 
 下载 `.dmg` 后双击打开即可安装/运行。这个版本是 Apple Silicon 原生版本，适合 M1/M2/M3/M4 等 M 系列芯片。

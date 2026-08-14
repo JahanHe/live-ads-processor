@@ -132,14 +132,35 @@ def ocr_number_after(text, labels):
     return ""
 
 
+def normalize_ocr_line(line):
+    replacements = {
+        "点跑": "点赞",
+        "点费": "点赞",
+        "点器": "点赞",
+        "新增加关注": "新增总关注",
+        "新增粉丝": "新增总关注",
+    }
+    normalized = re.sub(r"\s+", "", line)
+    for wrong, right in replacements.items():
+        normalized = normalized.replace(wrong, right)
+    return normalized
+
+
 def ocr_numbers(line):
     return re.findall(r"[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", line)
 
 
-def ocr_next_numbers(lines, required_labels):
-    for index, line in enumerate(lines[:-1]):
-        if all(label in line for label in required_labels):
-            return ocr_numbers(lines[index + 1])
+def ocr_next_numbers(lines, required_labels, min_matches=None, min_numbers=1):
+    min_matches = len(required_labels) if min_matches is None else min_matches
+    normalized_labels = [normalize_ocr_line(label) for label in required_labels]
+    normalized_lines = [normalize_ocr_line(line) for line in lines]
+    for index, line in enumerate(normalized_lines[:-1]):
+        if sum(label in line for label in normalized_labels) < min_matches:
+            continue
+        for next_line in lines[index + 1 : index + 4]:
+            numbers = ocr_numbers(next_line)
+            if len(numbers) >= min_numbers:
+                return numbers
     return []
 
 
@@ -157,7 +178,7 @@ def parse_long_plan_ocr_text(text):
         "下单GMV": ocr_number_after(text, ["当场下单GMV", "直接下单GMV", "下单GMV"]),
         "下单订单数": ocr_number_after(text, ["当场下单订单数", "直接下单订单数", "下单订单数"]),
     }
-    live_numbers = ocr_next_numbers(lines, ["消耗总金额", "曝光总人数", "新增总关注"])
+    live_numbers = ocr_next_numbers(lines, ["消耗总金额", "进入总人数", "新增总关注"], min_matches=2, min_numbers=6)
     if len(live_numbers) >= 6:
         result.update(
             {
@@ -169,11 +190,11 @@ def parse_long_plan_ocr_text(text):
                 "新增总关注": live_numbers[5],
             }
         )
-    deal_numbers = ocr_next_numbers(lines, ["成交ROI", "当场成交GMV", "当场成交订单数"])
+    deal_numbers = ocr_next_numbers(lines, ["成交ROI", "当场成交GMV", "当场成交订单数"], min_matches=2, min_numbers=6)
     if len(deal_numbers) >= 6:
         result["成交GMV"] = deal_numbers[2]
         result["成交订单数"] = deal_numbers[4]
-    order_numbers = ocr_next_numbers(lines, ["净成交订单数", "当场下单GMV", "当场下单订单数"])
+    order_numbers = ocr_next_numbers(lines, ["净成交订单数", "当场下单GMV", "当场下单订单数"], min_matches=2, min_numbers=6)
     if len(order_numbers) >= 6:
         result["下单GMV"] = order_numbers[3]
         result["下单订单数"] = order_numbers[5]

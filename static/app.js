@@ -44,10 +44,20 @@ const pasteTarget = document.querySelector("#pasteTarget");
 const rateMetricsAsPercent = document.querySelector("#rateMetricsAsPercent");
 const longPlanPanel = document.querySelector(".long-plan-panel");
 const longPlanOcrStatus = document.querySelector("#longPlanOcrStatus");
+const ocrPreviewPanel = document.querySelector("#ocrPreviewPanel");
+const ocrPreviewImage = document.querySelector("#ocrPreviewImage");
+const ocrPreviewButton = document.querySelector("#ocrPreviewButton");
+const clearOcrPreviewButton = document.querySelector("#clearOcrPreviewButton");
+const imageLightbox = document.querySelector("#imageLightbox");
+const lightboxImage = document.querySelector("#lightboxImage");
+const lightboxTitle = document.querySelector("#lightboxTitle");
+const closeLightboxButton = document.querySelector("#closeLightboxButton");
+const closeLightboxBackdrop = document.querySelector("#closeLightboxBackdrop");
 
 let currentFiles = [];
 let screenshotFiles = [];
 let screenshotThumbUrls = [];
+let ocrPreviewUrl = "";
 let previewData = {};
 let activeOcrButton = null;
 let ocrInstallable = false;
@@ -112,7 +122,9 @@ function setScreenshots(files) {
   screenshotThumbUrls = screenshotFiles.map((file) => URL.createObjectURL(file));
   screenshotThumbs.innerHTML = screenshotFiles.map((file, index) => `
     <div class="thumb-card">
-      <img src="${screenshotThumbUrls[index]}" alt="${file.name}">
+      <button class="thumb-image-button" data-preview-screenshot="${index}" type="button" aria-label="放大查看 ${file.name}">
+        <img src="${screenshotThumbUrls[index]}" alt="${file.name}">
+      </button>
       <div class="thumb-meta">
         <span title="${file.name}">${file.name}</span>
         <button class="thumb-remove" data-remove-screenshot="${index}" type="button" aria-label="移除 ${file.name}">移除</button>
@@ -120,6 +132,55 @@ function setScreenshots(files) {
     </div>
   `).join("");
   screenshotThumbs.hidden = false;
+}
+
+function showImageLightbox(src, title = "图片预览") {
+  if (!src) return;
+  lightboxImage.src = src;
+  lightboxImage.alt = title;
+  lightboxTitle.textContent = title;
+  imageLightbox.hidden = false;
+}
+
+function closeImageLightbox() {
+  imageLightbox.hidden = true;
+  lightboxImage.removeAttribute("src");
+  lightboxImage.alt = "";
+}
+
+function friendlyErrorText(error, fallback = "操作失败，请重试。") {
+  const raw = String(error?.message || error || "");
+  if (!raw) return fallback;
+  if (/writeText|write\(|ClipboardItem/i.test(raw)) {
+    return "无法写入剪切板。请检查浏览器剪切板权限，或改用下载文件。";
+  }
+  if (/Clipboard|clipboard|NotAllowedError|permission denied|Permission denied|Read permission denied/i.test(raw)) {
+    return "无法读取剪切板。请先允许剪切板权限，或点击粘贴截图后在输入框里按 Cmd+V / Ctrl+V。";
+  }
+  if (/network|fetch|Failed to fetch/i.test(raw)) {
+    return "连接本地处理服务失败，请确认处理面板仍在运行。";
+  }
+  if (/timeout/i.test(raw)) {
+    return "处理超时，请换一张更清晰或裁剪范围更小的截图后重试。";
+  }
+  return raw.replace(/^Error:\s*/i, "") || fallback;
+}
+
+function setOcrPreview(file) {
+  if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+  ocrPreviewUrl = URL.createObjectURL(file);
+  ocrPreviewImage.src = ocrPreviewUrl;
+  ocrPreviewImage.alt = file.name || "长期计划识别截图预览";
+  ocrPreviewPanel.hidden = false;
+  longPlanPanel.open = true;
+}
+
+function clearOcrPreview() {
+  if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+  ocrPreviewUrl = "";
+  ocrPreviewImage.removeAttribute("src");
+  ocrPreviewImage.alt = "长期计划识别截图预览";
+  ocrPreviewPanel.hidden = true;
 }
 
 function longPlanInputs() {
@@ -137,6 +198,9 @@ function longPlanRow() {
 
 function fillLongPlanRow(fields) {
   longPlanInputs().forEach((input) => {
+    input.value = "";
+  });
+  longPlanInputs().forEach((input) => {
     const value = fields[input.dataset.longPlan];
     if (value !== undefined && value !== null && value !== "") input.value = value;
   });
@@ -149,6 +213,7 @@ function clearLongPlanRow() {
   });
   resetResult();
   longPlanOcrStatus.textContent = "";
+  clearOcrPreview();
   message.textContent = "长期计划数据行已清空。";
 }
 
@@ -198,10 +263,11 @@ async function refreshOcrStatus(showReady = false) {
 }
 
 async function recognizeLongPlanImage(file, button = null) {
+  setOcrPreview(file);
   const formData = new FormData();
   formData.append("ocrImage", file);
-  setLongPlanOcrState("busy", "正在识别截图，请稍等。", button);
-  message.textContent = "正在识别长期计划截图。";
+  setLongPlanOcrState("busy", "正在识别截图，右侧可先查看原图。", button);
+  message.textContent = "正在识别长期计划截图，识别结果会自动填入左侧表单。";
   const response = await fetch("/api/ocr-long-plan", {
     method: "POST",
     body: formData,
@@ -218,15 +284,15 @@ async function recognizeLongPlanImage(file, button = null) {
   }
   fillLongPlanRow(payload.fields || {});
   resetResult();
-  setLongPlanOcrState("done", "识别完成，已预填长期计划数据行。");
-  message.textContent = "OCR 已预填长期计划数据行，请检查数字后再生成。";
+  setLongPlanOcrState("done", "识别完成，已预填。请对照右侧截图检查并手动修正。");
+  message.textContent = "OCR 已预填长期计划数据行。识别错的数字可以直接在左侧修改。";
 }
 
 function ocrErrorText(error) {
-  if (error.code !== "missing_tesseract") return error.message;
+  if (error.code !== "missing_tesseract") return friendlyErrorText(error, "OCR 识别失败，请换一张更清晰的截图后重试。");
   setInstallOcrVisible(Boolean(error.canInstall), error.installLabel);
   return [
-    error.message,
+    friendlyErrorText(error, "截图识别组件不可用。"),
     error.hint,
     error.canInstall ? "点击“安装截图识别组件”即可启用自动识别。" : error.installCommand ? `解决命令：${error.installCommand}` : "",
   ].filter(Boolean).join("\n");
@@ -377,8 +443,8 @@ pasteScreenshotButton.addEventListener("click", async () => {
         addScreenshots(files);
         message.textContent = "已直接读取剪切板截图。";
       }
-    } catch {
-      // Some browsers require the user to paste manually into the focused box.
+    } catch (error) {
+      message.textContent = friendlyErrorText(error, "无法直接读取剪切板，请在粘贴框里按 Cmd+V / Ctrl+V。");
     }
   }
 });
@@ -401,6 +467,15 @@ clearLongPlanButton.addEventListener("click", () => {
   clearLongPlanRow();
 });
 
+clearOcrPreviewButton.addEventListener("click", () => {
+  clearOcrPreview();
+  message.textContent = "识别截图预览已移除，已填写的数据不会被清空。";
+});
+
+ocrPreviewButton.addEventListener("click", () => {
+  showImageLightbox(ocrPreviewUrl, "长期计划识别截图");
+});
+
 longPlanInputs().forEach((input) => {
   input.addEventListener("input", () => {
     resetResult();
@@ -418,7 +493,13 @@ clearScreenshotButton.addEventListener("click", () => {
 
 screenshotThumbs.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-screenshot]");
-  if (!button) return;
+  if (!button) {
+    const previewButton = event.target.closest("[data-preview-screenshot]");
+    if (!previewButton) return;
+    const index = Number(previewButton.dataset.previewScreenshot);
+    showImageLightbox(screenshotThumbUrls[index], screenshotFiles[index]?.name || "截图预览");
+    return;
+  }
   const index = Number(button.dataset.removeScreenshot);
   if (!Number.isInteger(index)) return;
   const [removed] = screenshotFiles.splice(index, 1);
@@ -491,8 +572,9 @@ installOcrButton.addEventListener("click", async () => {
     message.textContent = "截图识别组件已安装，可以识别长期计划截图。";
     await refreshOcrStatus();
   } catch (error) {
-    setLongPlanOcrState("error", error.message || "截图识别组件安装失败。");
-    message.textContent = error.message || "截图识别组件安装失败。";
+    const text = friendlyErrorText(error, "截图识别组件安装失败。");
+    setLongPlanOcrState("error", text);
+    message.textContent = text;
   } finally {
     installOcrButton.textContent = idleText;
   }
@@ -589,7 +671,7 @@ processButton.addEventListener("click", async () => {
     }
     message.textContent = "XLSX 已生成，数据汇总已按当前面板设置处理。";
   } catch (error) {
-    message.textContent = error.message;
+    message.textContent = friendlyErrorText(error, "处理失败，请检查导入文件后重试。");
   } finally {
     processButton.disabled = !currentFiles.length;
   }
@@ -606,7 +688,15 @@ copyImageButton.addEventListener("click", async () => {
     ]);
     message.textContent = "已复制拼接图到剪切板。";
   } catch (error) {
-    message.textContent = "当前浏览器不允许直接复制图片，请使用下载拼接图。";
+    message.textContent = friendlyErrorText(error, "当前浏览器不允许直接复制图片，请使用下载拼接图。");
+  }
+});
+
+closeLightboxButton.addEventListener("click", closeImageLightbox);
+closeLightboxBackdrop.addEventListener("click", closeImageLightbox);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !imageLightbox.hidden) {
+    closeImageLightbox();
   }
 });
 
@@ -620,7 +710,7 @@ document.addEventListener("click", (event) => {
   if (!action) return;
   const [sheet, scope] = action.split("-");
   copyRows(sheet, scope === "all").catch((error) => {
-    message.textContent = error.message || "复制失败。";
+    message.textContent = friendlyErrorText(error, "复制失败。");
   });
 });
 

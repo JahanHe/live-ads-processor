@@ -53,17 +53,31 @@
                   <button class="secondary-button" id="clearLongPlanButton" type="button">清空</button>
                 </div>
               </summary>
-              <div class="long-plan-grid">
-                <label>消耗总金额<input data-long-plan="消耗总金额" inputmode="decimal" placeholder="1416.5" /></label>
-                <label>曝光总人数<input data-long-plan="曝光总人数" inputmode="numeric" placeholder="4700" /></label>
-                <label>进入总人数<input data-long-plan="进入总人数" inputmode="numeric" placeholder="1395" /></label>
-                <label>点赞总次数<input data-long-plan="点赞总次数" inputmode="numeric" placeholder="12" /></label>
-                <label>评论总次数<input data-long-plan="评论总次数" inputmode="numeric" placeholder="55" /></label>
-                <label>新增总关注<input data-long-plan="新增总关注" inputmode="numeric" placeholder="24" /></label>
-                <label>成交 GMV<input data-long-plan="成交GMV" inputmode="decimal" placeholder="5553.55" /></label>
-                <label>成交订单数<input data-long-plan="成交订单数" inputmode="numeric" placeholder="23" /></label>
-                <label>下单 GMV<input data-long-plan="下单GMV" inputmode="decimal" placeholder="6057.54" /></label>
-                <label>下单订单数<input data-long-plan="下单订单数" inputmode="numeric" placeholder="26" /></label>
+              <div class="long-plan-workspace">
+                <div class="long-plan-grid">
+                  <label>消耗总金额<input data-long-plan="消耗总金额" inputmode="decimal" /></label>
+                  <label>曝光总人数<input data-long-plan="曝光总人数" inputmode="numeric" /></label>
+                  <label>进入总人数<input data-long-plan="进入总人数" inputmode="numeric" /></label>
+                  <label>点赞总次数<input data-long-plan="点赞总次数" inputmode="numeric" /></label>
+                  <label>评论总次数<input data-long-plan="评论总次数" inputmode="numeric" /></label>
+                  <label>新增总关注<input data-long-plan="新增总关注" inputmode="numeric" /></label>
+                  <label>成交 GMV<input data-long-plan="成交GMV" inputmode="decimal" /></label>
+                  <label>成交订单数<input data-long-plan="成交订单数" inputmode="numeric" /></label>
+                  <label>下单 GMV<input data-long-plan="下单GMV" inputmode="decimal" /></label>
+                  <label>下单订单数<input data-long-plan="下单订单数" inputmode="numeric" /></label>
+                </div>
+                <aside class="ocr-preview-panel" id="ocrPreviewPanel" hidden>
+                  <div class="ocr-preview-heading">
+                    <div>
+                      <span class="label">识别截图</span>
+                      <strong>对照右图检查数字</strong>
+                    </div>
+                    <button class="thumb-remove" id="clearOcrPreviewButton" type="button">移除预览</button>
+                  </div>
+                  <button class="image-preview-button" id="ocrPreviewButton" type="button" aria-label="放大查看识别截图">
+                    <img id="ocrPreviewImage" alt="长期计划识别截图预览" />
+                  </button>
+                </aside>
               </div>
             </details>
 
@@ -250,6 +264,17 @@
         <p class="message" id="message" role="status"></p>
       </section>
     </main>
+
+    <div class="image-lightbox" id="imageLightbox" hidden>
+      <button class="lightbox-backdrop" id="closeLightboxBackdrop" type="button" aria-label="关闭图片预览"></button>
+      <div class="lightbox-panel" role="dialog" aria-modal="true" aria-label="图片预览">
+        <div class="lightbox-heading">
+          <strong id="lightboxTitle">图片预览</strong>
+          <button class="secondary-button" id="closeLightboxButton" type="button">关闭</button>
+        </div>
+        <img id="lightboxImage" alt="" />
+      </div>
+    </div>
 
     <script src="/static/app.js"></script>
   </body>
