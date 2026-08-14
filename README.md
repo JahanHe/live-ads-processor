@@ -56,7 +56,7 @@ https://github.com/JahanHe/live-ads-processor/releases
 Windows 用户下载：
 
 ```text
-live-ads-processor-windows-v2.3.0.exe
+live-ads-processor-windows-v2.3.1.exe
 ```
 
 详细步骤见：
