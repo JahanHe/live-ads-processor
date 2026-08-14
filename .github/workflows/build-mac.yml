@@ -48,6 +48,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Install OCR dependencies
+        run: brew install tesseract tesseract-lang
+
       - name: Build backend executable
         run: pyinstaller --noconfirm --clean live_ads_processor.spec
 

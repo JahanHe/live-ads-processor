@@ -196,6 +196,17 @@ h2 {
   cursor: wait;
 }
 
+.install-button {
+  border-color: rgba(93, 184, 114, 0.45);
+  color: #2f7d43;
+  background: #edf7ef;
+}
+
+.install-button:hover {
+  border-color: rgba(93, 184, 114, 0.72);
+  background: #e3f2e6;
+}
+
 .button-row {
   position: relative;
   z-index: 1;

@@ -12,6 +12,7 @@ import tempfile
 import threading
 import uuid
 import webbrowser
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,6 +43,7 @@ APP_DIR = app_base_dir()
 OUTPUT_DIR = Path(tempfile.gettempdir()) / "live_ads_panel_outputs"
 STATIC_DIR = APP_DIR / "static"
 TABLE_SUFFIXES = {".csv", ".tsv", ".txt", ".xlsx", ".xlsm", ".xls"}
+OCR_DIR = Path(os.environ.get("LIVE_ADS_OCR_DIR", Path.home() / ".live_ads_processor" / "ocr"))
 
 
 def summarize_rows(rows):
@@ -179,24 +181,144 @@ def parse_long_plan_ocr_text(text):
 
 
 def tesseract_path():
+    installed = OCR_DIR / ("tesseract.exe" if sys.platform == "win32" else "tesseract")
+    if installed.exists():
+        return str(installed)
     bundled = APP_DIR / "ocr" / ("tesseract.exe" if sys.platform == "win32" else "tesseract")
     if bundled.exists():
         return str(bundled)
-    return shutil.which("tesseract")
+    system = shutil.which("tesseract")
+    if system:
+        return system
+    if sys.platform == "win32":
+        for path in (
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
+            Path("C:/Program Files/Tesseract-OCR/tesseract.exe"),
+            Path("C:/Program Files (x86)/Tesseract-OCR/tesseract.exe"),
+        ):
+            if path.exists():
+                return str(path)
+    return None
+
+
+def tessdata_dir():
+    for path in (OCR_DIR / "tessdata", APP_DIR / "ocr" / "tessdata"):
+        if (path / "chi_sim.traineddata").exists() and (path / "eng.traineddata").exists():
+            return path
+    tesseract = tesseract_path()
+    if tesseract:
+        share = Path(tesseract).resolve().parents
+        for parent in share:
+            candidate = parent / "share" / "tessdata"
+            if (candidate / "chi_sim.traineddata").exists() and (candidate / "eng.traineddata").exists():
+                return candidate
+    for path in (Path("/opt/homebrew/share/tessdata"), Path("/usr/local/share/tessdata")):
+        if (path / "chi_sim.traineddata").exists() and (path / "eng.traineddata").exists():
+            return path
+    if sys.platform == "win32":
+        for path in (
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tessdata",
+            Path("C:/Program Files/Tesseract-OCR/tessdata"),
+            Path("C:/Program Files (x86)/Tesseract-OCR/tessdata"),
+        ):
+            if (path / "chi_sim.traineddata").exists() and (path / "eng.traineddata").exists():
+                return path
+    return None
 
 
 def tesseract_env():
     env = os.environ.copy()
-    tessdata = APP_DIR / "ocr" / "tessdata"
-    if tessdata.exists():
+    tessdata = tessdata_dir()
+    if tessdata:
         env["TESSDATA_PREFIX"] = str(tessdata)
     return env
+
+
+def ocr_status_payload():
+    tesseract = tesseract_path()
+    tessdata = tessdata_dir()
+    installed = bool(tesseract and tessdata)
+    return {
+        "ok": True,
+        "installed": installed,
+        "tesseractPath": str(tesseract or ""),
+        "tessdataPath": str(tessdata or ""),
+        "installable": not installed and ocr_install_available(),
+        "installLabel": "" if installed else ocr_install_label(),
+    }
+
+
+def ocr_component_packages():
+    suffix = "windows" if sys.platform == "win32" else "mac" if sys.platform == "darwin" else "linux"
+    return [
+        APP_DIR / f"ocr-component-{suffix}.zip",
+        APP_DIR / "ocr-component.zip",
+    ]
+
+
+def ocr_install_available():
+    if any(path.exists() for path in ocr_component_packages()):
+        return True
+    if sys.platform == "darwin":
+        return shutil.which("brew") is not None
+    if sys.platform == "win32":
+        return shutil.which("winget") is not None
+    return False
+
+
+def ocr_install_label():
+    if any(path.exists() for path in ocr_component_packages()):
+        return "安装截图识别组件"
+    if sys.platform == "darwin" and shutil.which("brew"):
+        return "安装截图识别组件"
+    if sys.platform == "win32" and shutil.which("winget"):
+        return "安装截图识别组件"
+    return ""
+
+
+def install_ocr_component():
+    if tesseract_path() and tessdata_dir():
+        return {"ok": True, "installed": True, "message": "截图识别组件已安装。"}
+    for package in ocr_component_packages():
+        if package.exists():
+            OCR_DIR.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(package) as archive:
+                archive.extractall(OCR_DIR)
+            executable = OCR_DIR / ("tesseract.exe" if sys.platform == "win32" else "tesseract")
+            if executable.exists() and sys.platform != "win32":
+                executable.chmod(executable.stat().st_mode | 0o111)
+            if tesseract_path() and tessdata_dir():
+                return {"ok": True, "installed": True, "message": "截图识别组件已安装。"}
+            raise RuntimeError("识别组件包已解压，但缺少程序或中文识别数据。")
+    if sys.platform == "darwin":
+        brew = shutil.which("brew")
+        if not brew:
+            raise RuntimeError("当前电脑没有可用的组件包，也没有 Homebrew，无法一键安装。")
+        subprocess.run([brew, "install", "tesseract", "tesseract-lang"], check=True, text=True, capture_output=True, timeout=600)
+        if not (tesseract_path() and tessdata_dir()):
+            raise RuntimeError("组件安装完成，但当前进程还没有检测到截图识别组件。请重启软件后再试。")
+        return {"ok": True, "installed": True, "message": "截图识别组件已安装。"}
+    if sys.platform == "win32":
+        winget = shutil.which("winget")
+        if not winget:
+            raise RuntimeError("当前电脑没有可用的组件包，也没有 winget，无法一键安装。")
+        subprocess.run(
+            [winget, "install", "--id", "UB-Mannheim.TesseractOCR", "-e", "--accept-package-agreements", "--accept-source-agreements"],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=600,
+        )
+        if not (tesseract_path() and tessdata_dir()):
+            raise RuntimeError("组件安装完成，但当前进程还没有检测到截图识别组件。请重启软件后再试。")
+        return {"ok": True, "installed": True, "message": "截图识别组件已安装。"}
+    raise RuntimeError("当前系统暂不支持一键安装截图识别组件。")
 
 
 def missing_tesseract_payload():
     if sys.platform == "darwin":
         command = "brew install tesseract tesseract-lang"
-        hint = "当前 Mac 还不能自动识别截图。你可以先手动填写；如果要启用截图识别，安装后重启这个面板即可。"
+        hint = "当前 Mac 还不能自动识别截图。你可以先手动填写；也可以一键安装识别组件后继续使用。"
     elif sys.platform == "win32":
         command = "把 tesseract.exe 放到 ocr/tesseract.exe，或安装 Tesseract 后加入 PATH"
         hint = "当前 Windows 还不能自动识别截图。你可以先手动填写；正式桌面版可以把识别组件一起打包。"
@@ -209,6 +331,8 @@ def missing_tesseract_payload():
         "error": "截图识别组件未安装。",
         "hint": hint,
         "installCommand": command,
+        "canInstall": ocr_install_available(),
+        "installLabel": ocr_install_label(),
     }
 
 
@@ -219,6 +343,9 @@ class AppHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/":
             self.serve_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
+            return
+        if parsed.path == "/api/ocr-status":
+            self.send_json(ocr_status_payload())
             return
         if parsed.path.startswith("/static/"):
             rel_path = unquote(parsed.path.removeprefix("/static/"))
@@ -236,6 +363,9 @@ class AppHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/ocr-long-plan":
             self.handle_ocr_long_plan()
+            return
+        if path == "/api/install-ocr":
+            self.handle_install_ocr()
             return
         if path != "/api/process":
             self.send_error(HTTPStatus.NOT_FOUND, "接口不存在")
@@ -386,6 +516,23 @@ class AppHandler(BaseHTTPRequestHandler):
                     temp_image.unlink()
             except FileNotFoundError:
                 pass
+
+    def handle_install_ocr(self):
+        try:
+            payload = install_ocr_component()
+            payload.update(ocr_status_payload())
+            payload["message"] = payload.get("message") or "截图识别组件已安装。"
+            self.send_json(payload)
+        except Exception as exc:
+            self.send_json(
+                {
+                    "ok": False,
+                    "code": "ocr_install_failed",
+                    "error": str(exc),
+                    "status": ocr_status_payload(),
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def serve_file(self, path, content_type=None):
         if not path.exists() or not path.is_file():

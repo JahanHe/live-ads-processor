@@ -4,6 +4,7 @@ const chooseButton = document.querySelector("#chooseButton");
 const longPlanOcrInput = document.querySelector("#longPlanOcrInput");
 const ocrLongPlanButton = document.querySelector("#ocrLongPlanButton");
 const ocrClipboardButton = document.querySelector("#ocrClipboardButton");
+const installOcrButton = document.querySelector("#installOcrButton");
 const chooseScreenshotButton = document.querySelector("#chooseScreenshotButton");
 const pasteScreenshotButton = document.querySelector("#pasteScreenshotButton");
 const selectedFile = document.querySelector("#selectedFile");
@@ -49,6 +50,7 @@ let screenshotFiles = [];
 let screenshotThumbUrls = [];
 let previewData = {};
 let activeOcrButton = null;
+let ocrInstallable = false;
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
   style: "currency",
@@ -162,7 +164,7 @@ function setLongPlanOcrState(state, text = "", button = null) {
   longPlanPanel.setAttribute("aria-busy", String(isBusy));
   longPlanOcrStatus.textContent = text;
   longPlanOcrStatus.className = `inline-status${state ? ` is-${state}` : ""}`;
-  [ocrLongPlanButton, ocrClipboardButton, clearLongPlanButton].forEach((control) => {
+  [ocrLongPlanButton, ocrClipboardButton, installOcrButton, clearLongPlanButton].forEach((control) => {
     control.disabled = isBusy;
   });
   if (activeOcrButton && activeOcrButton !== button) {
@@ -172,6 +174,26 @@ function setLongPlanOcrState(state, text = "", button = null) {
   if (button) {
     button.dataset.idleText ||= button.textContent;
     button.textContent = isBusy ? "识别中..." : button.dataset.idleText;
+  }
+}
+
+function setInstallOcrVisible(visible, label = "安装截图识别组件") {
+  ocrInstallable = visible;
+  installOcrButton.hidden = !visible;
+  installOcrButton.textContent = label || "安装截图识别组件";
+}
+
+async function refreshOcrStatus(showReady = false) {
+  try {
+    const response = await fetch("/api/ocr-status");
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) return;
+    setInstallOcrVisible(Boolean(!payload.installed && payload.installable), payload.installLabel);
+    if (payload.installed && showReady) {
+      setLongPlanOcrState("done", "截图识别组件已就绪。");
+    }
+  } catch {
+    // OCR is optional; keep the form usable even if status probing fails.
   }
 }
 
@@ -190,6 +212,8 @@ async function recognizeLongPlanImage(file, button = null) {
     error.code = payload.code || "";
     error.hint = payload.hint || "";
     error.installCommand = payload.installCommand || "";
+    error.canInstall = Boolean(payload.canInstall);
+    error.installLabel = payload.installLabel || "";
     throw error;
   }
   fillLongPlanRow(payload.fields || {});
@@ -200,10 +224,11 @@ async function recognizeLongPlanImage(file, button = null) {
 
 function ocrErrorText(error) {
   if (error.code !== "missing_tesseract") return error.message;
+  setInstallOcrVisible(Boolean(error.canInstall), error.installLabel);
   return [
     error.message,
     error.hint,
-    error.installCommand ? `解决命令：${error.installCommand}` : "",
+    error.canInstall ? "点击“安装截图识别组件”即可启用自动识别。" : error.installCommand ? `解决命令：${error.installCommand}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -450,6 +475,29 @@ document.querySelector(".long-plan-heading .button-row").addEventListener("click
   event.stopPropagation();
 });
 
+installOcrButton.addEventListener("click", async () => {
+  if (!ocrInstallable) return;
+  const idleText = installOcrButton.textContent;
+  try {
+    setLongPlanOcrState("busy", "正在安装截图识别组件，请不要关闭软件。", installOcrButton);
+    installOcrButton.dataset.idleText = idleText;
+    const response = await fetch("/api/install-ocr", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok || !payload.installed) {
+      throw new Error(payload.error || "截图识别组件安装失败。");
+    }
+    setInstallOcrVisible(false);
+    setLongPlanOcrState("done", payload.message || "截图识别组件已安装，可以识别截图。");
+    message.textContent = "截图识别组件已安装，可以识别长期计划截图。";
+    await refreshOcrStatus();
+  } catch (error) {
+    setLongPlanOcrState("error", error.message || "截图识别组件安装失败。");
+    message.textContent = error.message || "截图识别组件安装失败。";
+  } finally {
+    installOcrButton.textContent = idleText;
+  }
+});
+
 longPlanOcrInput.addEventListener("change", async () => {
   const [file] = longPlanOcrInput.files;
   longPlanOcrInput.value = "";
@@ -584,3 +632,5 @@ document.querySelectorAll("#useThousands, #crossHighlight, #rateMetricsAsPercent
     }
   });
 });
+
+refreshOcrStatus();

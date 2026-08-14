@@ -43,6 +43,7 @@ async function startBackend() {
   const port = await findFreePort();
   const env = {
     ...process.env,
+    LIVE_ADS_OCR_DIR: path.join(app.getPath("userData"), "ocr"),
     NO_BROWSER: "1",
     PORT: String(port),
   };
