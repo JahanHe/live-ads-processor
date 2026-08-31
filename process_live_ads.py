@@ -44,6 +44,35 @@ INPUT_ALIASES = {
     "当场下单订单数": "总下单订单数",
 }
 
+NEW_STANDARD_REQUIRED_HEADERS = {
+    "订单信息",
+    "投放进度",
+    "实际加热时长",
+    "新增关注数",
+    "当场成交订单数",
+    "当场成交金额",
+    "当场下单金额",
+    "曝光人数",
+    "观看人数",
+    "超过1分钟观看人数",
+    "点赞数",
+    "评论数",
+}
+
+DETAIL_REQUIRED_HEADERS = {
+    "订单/计划",
+    "消耗金额",
+    "曝光人数",
+    "观看人数",
+    "新增关注数",
+    "评论数",
+    "当场成交金额",
+    "当场成交ROI",
+    "当场成交订单数",
+    "当场下单金额",
+    "当场下单订单数",
+}
+
 LONG_PLAN_ALIASES = {
     "消耗总金额": ("总消耗", 1),
     "直播间消耗": ("总消耗", 1),
@@ -149,12 +178,46 @@ def to_number(value):
     text = str(value).strip()
     if text == "" or text.upper() == "N/A":
         return 0
-    text = text.replace(",", "").replace("¥", "").replace("%", "")
+    text = text.replace(",", "").replace("¥", "").replace("￥", "").replace("%", "")
     try:
         number = float(text)
     except ValueError:
         return 0
     return int(number) if number.is_integer() else number
+
+
+def first_number(value):
+    text = str(value or "").replace(",", "")
+    match = re.search(r"-?\d+(?:\.\d+)?", text)
+    if not match:
+        return 0
+    number = float(match.group(0))
+    return int(number) if number.is_integer() else number
+
+
+def first_money(value):
+    text = str(value or "").replace(",", "")
+    match = re.search(r"[¥￥]\s*(-?\d+(?:\.\d+)?)", text)
+    return first_number(match.group(1)) if match else first_number(text)
+
+
+def duration_to_seconds(value):
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    hours = re.search(r"(\d+(?:\.\d+)?)\s*小时", text)
+    minutes = re.search(r"(\d+(?:\.\d+)?)\s*分钟", text)
+    seconds = re.search(r"(\d+(?:\.\d+)?)\s*秒", text)
+    total = 0
+    if hours:
+        total += float(hours.group(1)) * 3600
+    if minutes:
+        total += float(minutes.group(1)) * 60
+    if seconds:
+        total += float(seconds.group(1))
+    if total:
+        return int(total) if float(total).is_integer() else total
+    return first_number(text)
 
 
 def safe_ratio(numerator, denominator):
@@ -172,11 +235,103 @@ def normalize_date_text(value):
     return text
 
 
+def date_from_order_info(value):
+    match = re.search(r"\b(1[6-9]\d{8})_\d+\b", str(value or ""))
+    if not match:
+        return ""
+    try:
+        from datetime import datetime
+
+        date = datetime.fromtimestamp(int(match.group(1)))
+        return f"{date.year}年{date.month}月{date.day}日"
+    except Exception:
+        return ""
+
+
+def order_id_from_order_info(value):
+    match = re.search(r"\b(1[6-9]\d{8}_\d+)\b", str(value or ""))
+    return match.group(1) if match else ""
+
+
+def is_new_standard_row(raw):
+    return NEW_STANDARD_REQUIRED_HEADERS.issubset({clean_header(key) for key in raw})
+
+
+def is_detail_row(raw):
+    return is_detail_header_set({clean_header(key) for key in raw})
+
+
+def normalize_new_standard_row(raw):
+    cleaned = {clean_header(key): value for key, value in raw.items()}
+    order_info = cleaned.get("订单信息", "")
+    date_text = date_from_order_info(order_info)
+    return {
+        "加热主播": cleaned.get("加热对象", "") or "吴晓波频道",
+        "创建时间": date_text,
+        "名称": order_info,
+        "编号": order_id_from_order_info(order_info),
+        "加热开始时间": date_text,
+        "加热结束时间": date_text,
+        "实际加热时长（秒）": duration_to_seconds(cleaned.get("实际加热时长")),
+        "总消耗": first_money(cleaned.get("投放进度") or cleaned.get("消耗详情")),
+        "直播间曝光人数": to_number(cleaned.get("曝光人数")),
+        "直播间观看人数": to_number(cleaned.get("观看人数")),
+        "直播间新增粉丝数": to_number(cleaned.get("新增关注数")),
+        "直播间评论次数": to_number(cleaned.get("评论数")),
+        "直播间点赞次数": to_number(cleaned.get("点赞数")),
+        "直播间超过1分钟观看人数": to_number(cleaned.get("超过1分钟观看人数")),
+        "总成交金额": to_number(cleaned.get("当场成交金额")),
+        "总成交ROI": to_number(cleaned.get("当场成交ROI")),
+        "总成交订单数": to_number(cleaned.get("当场成交订单数")),
+        "总下单金额": to_number(cleaned.get("当场下单金额")),
+        "总下单订单数": to_number(cleaned.get("当场下单订单数")),
+        "_input_priority": 1,
+    }
+
+
+def normalize_detail_row(raw):
+    cleaned = {clean_header(key): value for key, value in raw.items()}
+    order_info = cleaned.get("订单/计划", "")
+    date_text = (
+        date_from_order_info(order_info)
+        or normalize_date_text(cleaned.get("直播间场次"))
+        or normalize_date_text(cleaned.get("按天"))
+    )
+    one_minute_views = cleaned.get("超过1分钟观看人数", cleaned.get("超过1分钟观看人次"))
+    return {
+        "加热主播": cleaned.get("加热对象", "") or cleaned.get("作者", "") or "吴晓波频道",
+        "创建时间": date_text,
+        "名称": order_info,
+        "编号": order_id_from_order_info(order_info),
+        "加热开始时间": date_text,
+        "加热结束时间": date_text,
+        "实际加热时长（秒）": 0,
+        "总消耗": first_money(cleaned.get("消耗金额")),
+        "直播间曝光人数": to_number(cleaned.get("曝光人数")),
+        "直播间观看人数": to_number(cleaned.get("观看人数")),
+        "直播间新增粉丝数": to_number(cleaned.get("新增关注数")),
+        "直播间评论次数": to_number(cleaned.get("评论数")),
+        "直播间点赞次数": to_number(cleaned.get("点赞数")),
+        "直播间超过1分钟观看人数": to_number(one_minute_views),
+        "总成交金额": first_money(cleaned.get("当场成交金额")),
+        "总成交ROI": to_number(cleaned.get("当场成交ROI")),
+        "总成交订单数": to_number(cleaned.get("当场成交订单数")),
+        "总下单金额": first_money(cleaned.get("当场下单金额")),
+        "总下单订单数": to_number(cleaned.get("当场下单订单数")),
+        "_input_priority": 2,
+    }
+
+
 def normalize_source_row(raw):
+    if is_detail_row(raw):
+        return normalize_detail_row(raw)
+    if is_new_standard_row(raw):
+        return normalize_new_standard_row(raw)
     normalized = {}
     for key, value in raw.items():
         header = INPUT_ALIASES.get(clean_header(key), clean_header(key))
         normalized[header] = value
+    normalized["_input_priority"] = 0
     return normalized
 
 
@@ -243,7 +398,28 @@ def read_csv_files(input_paths):
         raw_headers, rows = read_table_file(input_path)
         header_sets.append((Path(input_path).name, raw_headers))
         all_rows.extend(rows)
-    return header_sets, all_rows
+    return header_sets, merge_source_rows(all_rows)
+
+
+def merge_source_rows(rows):
+    merged = []
+    by_id = {}
+    for row in rows:
+        row_id = str(row.get("编号") or "").strip()
+        if not row_id:
+            merged.append(row)
+            continue
+        existing_index = by_id.get(row_id)
+        if existing_index is None:
+            by_id[row_id] = len(merged)
+            merged.append(row)
+            continue
+        existing = merged[existing_index]
+        if to_number(row.get("_input_priority")) >= to_number(existing.get("_input_priority")):
+            combined = dict(existing)
+            combined.update({key: value for key, value in row.items() if value not in ("", None)})
+            merged[existing_index] = combined
+    return merged
 
 
 def row_from_long_plan(raw, filename):
@@ -309,20 +485,36 @@ def read_long_plan_files(input_paths):
 def validate_inputs(header_sets, rows):
     warnings = []
     for filename, headers in header_sets:
-        normalized_headers = {INPUT_ALIASES.get(header, header) for header in headers}
-        missing = [header for header in SOURCE_HEADERS if header not in normalized_headers]
+        header_set = set(headers)
+        if NEW_STANDARD_REQUIRED_HEADERS.issubset(header_set) or is_detail_header_set(header_set):
+            missing = []
+        else:
+            normalized_headers = {INPUT_ALIASES.get(header, header) for header in headers}
+            missing = [header for header in SOURCE_HEADERS if header not in normalized_headers]
         if missing:
             warnings.append(f"{filename} 缺少表头：{'、'.join(missing)}。强制转化可能出现错误。")
     if len(header_sets) > 1:
-        first_headers = [INPUT_ALIASES.get(header, header) for header in header_sets[0][1]]
+        first_headers = normalized_header_signature(header_sets[0][1])
         for filename, headers in header_sets[1:]:
-            normalized = [INPUT_ALIASES.get(header, header) for header in headers]
+            normalized = normalized_header_signature(headers)
             if normalized != first_headers:
                 warnings.append(f"{filename} 的表头顺序或字段与第一张表格不一致。")
     anchors = sorted({str(row.get("加热主播", "")).strip() for row in rows if str(row.get("加热主播", "")).strip()})
     if len(anchors) > 1:
         warnings.append(f"检测到多个加热主播：{'、'.join(anchors)}。请确认是否应合并处理。")
     return warnings
+
+
+def normalized_header_signature(headers):
+    header_set = set(headers)
+    if is_detail_header_set(header_set) or NEW_STANDARD_REQUIRED_HEADERS.issubset(header_set):
+        return ["新标准平台导出"]
+    return [INPUT_ALIASES.get(header, header) for header in headers]
+
+
+def is_detail_header_set(headers):
+    has_one_minute = bool({"超过1分钟观看人数", "超过1分钟观看人次"}.intersection(headers))
+    return DETAIL_REQUIRED_HEADERS.issubset(headers) and has_one_minute
 
 
 def validate_long_plan_inputs(header_sets):
@@ -343,8 +535,12 @@ def default_output_stem(rows):
         date_text = normalize_date_text(row.get("加热开始时间", "")) or normalize_date_text(row.get("创建时间", ""))
         if date_text:
             break
-    anchor = str(rows[0].get("加热主播", "") or "").strip()
+    anchor = output_anchor_name(rows[0].get("加热主播", ""))
     return f"{date_text}{anchor}直播投放数据" if date_text or anchor else "直播投放数据"
+
+
+def output_anchor_name(value):
+    return re.sub(r"\s*教育自媒体\s*$", "", str(value or "").strip())
 
 
 def row_category(name):
@@ -608,19 +804,23 @@ def combined_summary_image(ws, image_paths):
 def insert_summary_images(ws, image_paths, combined_image_path=None):
     if not image_paths:
         return None
-    combined = combined_summary_image(ws, image_paths)
-    if combined is None:
-        return None
-    output_path = Path(combined_image_path) if combined_image_path else Path(image_paths[0]).with_name(f"{Path(image_paths[0]).stem}_summary_combined.png")
-    combined.save(output_path)
-    image = ExcelImage(str(output_path))
+    anchor_row = ws.max_row + 3
+    inserted = False
     max_width = 1400
-    if image.width and image.width > max_width:
-        ratio = max_width / image.width
-        image.width = max_width
-        image.height = int(image.height * ratio)
-    ws.add_image(image, f"A{ws.max_row + 3}")
-    return output_path
+    for image_path in image_paths:
+        try:
+            image = ExcelImage(str(image_path))
+        except Exception:
+            continue
+        if image.width and image.width > max_width:
+            ratio = max_width / image.width
+            image.width = max_width
+            image.height = int(image.height * ratio)
+        ws.add_image(image, f"A{anchor_row}")
+        inserted = True
+        row_span = max(12, int((image.height or 360) / 18) + 2)
+        anchor_row += row_span
+    return None if inserted else None
 
 
 def populate_source(ws, rows):

@@ -37,6 +37,11 @@ const screenshotThumbs = document.querySelector("#screenshotThumbs");
 const outputNameInput = document.querySelector("#outputNameInput");
 const warningsCard = document.querySelector("#warningsCard");
 const warningsList = document.querySelector("#warningsList");
+const screenshotCheckCard = document.querySelector("#screenshotCheckCard");
+const screenshotCheckTitle = document.querySelector("#screenshotCheckTitle");
+const screenshotCheckStatus = document.querySelector("#screenshotCheckStatus");
+const screenshotCheckMessage = document.querySelector("#screenshotCheckMessage");
+const screenshotCheckGrid = document.querySelector("#screenshotCheckGrid");
 const crossHighlight = document.querySelector("#crossHighlight");
 const screenshotZone = document.querySelector("#screenshotZone");
 const pastePanel = document.querySelector("#pastePanel");
@@ -53,6 +58,9 @@ const lightboxImage = document.querySelector("#lightboxImage");
 const lightboxTitle = document.querySelector("#lightboxTitle");
 const closeLightboxButton = document.querySelector("#closeLightboxButton");
 const closeLightboxBackdrop = document.querySelector("#closeLightboxBackdrop");
+const sheet3SelectButton = document.querySelector("#sheet3SelectButton");
+const sheet3CopySelectedButton = document.querySelector("#sheet3CopySelectedButton");
+const sheet3ClearSelectionButton = document.querySelector("#sheet3ClearSelectionButton");
 
 let currentFiles = [];
 let screenshotFiles = [];
@@ -61,6 +69,8 @@ let ocrPreviewUrl = "";
 let previewData = {};
 let activeOcrButton = null;
 let ocrInstallable = false;
+let sheet3SelectionMode = false;
+const sheet3SelectedCells = new Set();
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
   style: "currency",
@@ -74,16 +84,21 @@ function resetResult() {
   metrics.hidden = true;
   downloadCard.hidden = true;
   warningsCard.hidden = true;
+  screenshotCheckCard.hidden = true;
   previewSection.hidden = true;
   sheet2Table.innerHTML = "";
   sheet3Table.innerHTML = "";
   previewData = {};
+  clearSheet3Selection();
   outputName.textContent = "";
   downloadLink.removeAttribute("href");
   imageDownloadLink.hidden = true;
   copyImageButton.hidden = true;
   imageDownloadLink.removeAttribute("href");
   warningsList.innerHTML = "";
+  screenshotCheckGrid.innerHTML = "";
+  screenshotCheckMessage.textContent = "";
+  screenshotCheckStatus.textContent = "";
 }
 
 function setFiles(files) {
@@ -320,6 +335,46 @@ function formatSummary(summary) {
   metrics.hidden = false;
 }
 
+function formatCheckValue(value, label = "") {
+  if (value === null || value === undefined || value === "") return "未识别";
+  if (typeof value !== "number") return value;
+  const fractionDigits = label.includes("ROI") ? 4 : value % 1 ? 2 : 0;
+  return new Intl.NumberFormat("zh-CN", {
+    useGrouping: true,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+function renderScreenshotCheck(check) {
+  if (!check || check.status === "none") {
+    screenshotCheckCard.hidden = true;
+    return;
+  }
+  const statusText = {
+    matched: "一致",
+    partial: "部分核对",
+    mismatch: "有差异",
+    unavailable: "无法自动核对",
+  }[check.status] || "待核对";
+  screenshotCheckTitle.textContent = "截图与表格数据核对";
+  screenshotCheckStatus.textContent = statusText;
+  screenshotCheckStatus.className = `check-status is-${check.status || "unknown"}`;
+  screenshotCheckMessage.textContent = check.message || "";
+  screenshotCheckGrid.innerHTML = (check.items || []).map((item) => {
+    const state = item.match === true ? "一致" : item.match === false ? "不一致" : "未识别";
+    const stateClass = item.match === true ? "is-match" : item.match === false ? "is-mismatch" : "is-missing";
+    return `
+      <article class="check-item ${stateClass}">
+        <span>${item.label}</span>
+        <strong>${state}</strong>
+        <small>表格：${formatCheckValue(item.tableValue, item.label)} ｜ 截图：${formatCheckValue(item.screenshotValue, item.label)}</small>
+      </article>
+    `;
+  }).join("");
+  screenshotCheckCard.hidden = false;
+}
+
 function activeDecimalMode() {
   return document.querySelector("input[name='decimalMode']:checked").value;
 }
@@ -361,9 +416,10 @@ function rowGroupClass(rowIndex) {
   return "";
 }
 
-function renderTable(table, rows, grouped = false) {
+function renderTable(table, rows, grouped = false, options = {}) {
   table.innerHTML = "";
   table.classList.toggle("is-highlightable", crossHighlight.checked);
+  table.classList.toggle("is-selectable", Boolean(options.selectable));
   const thead = document.createElement("thead");
   const tbody = document.createElement("tbody");
   const headerRow = document.createElement("tr");
@@ -382,6 +438,7 @@ function renderTable(table, rows, grouped = false) {
       td.textContent = formatCell(value, row);
       td.dataset.row = String(index + 1);
       td.dataset.col = String(colIndex);
+      td.dataset.key = `${index + 1}:${colIndex}`;
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
@@ -389,6 +446,45 @@ function renderTable(table, rows, grouped = false) {
 
   table.appendChild(thead);
   table.appendChild(tbody);
+}
+
+function clearSheet3Selection() {
+  sheet3SelectedCells.clear();
+  sheet3Table.querySelectorAll(".is-selected-cell").forEach((cell) => {
+    cell.classList.remove("is-selected-cell");
+  });
+}
+
+function setSheet3SelectionMode(enabled) {
+  sheet3SelectionMode = enabled;
+  sheet3Table.classList.toggle("is-selection-mode", enabled);
+  sheet3SelectButton.classList.toggle("is-active", enabled);
+  sheet3SelectButton.textContent = enabled ? "退出选择" : "选择单元格";
+  if (!enabled) clearSheet3Selection();
+}
+
+function toggleSheet3Cell(cell) {
+  const key = cell.dataset.key;
+  if (!key) return;
+  if (sheet3SelectedCells.has(key)) {
+    sheet3SelectedCells.delete(key);
+    cell.classList.remove("is-selected-cell");
+    return;
+  }
+  sheet3SelectedCells.add(key);
+  cell.classList.add("is-selected-cell");
+}
+
+function selectedSheet3Rows() {
+  const rows = previewData.sheet3 || [];
+  const selected = [...sheet3SelectedCells].map((key) => key.split(":").map(Number));
+  if (!selected.length) return [];
+  const rowIndexes = [...new Set(selected.map(([row]) => row))].sort((a, b) => a - b);
+  const colIndexes = [...new Set(selected.map(([, col]) => col))].sort((a, b) => a - b);
+  return rowIndexes.map((rowIndex) => {
+    const raw = rows[rowIndex] || [];
+    return colIndexes.map((colIndex) => sheet3SelectedCells.has(`${rowIndex}:${colIndex}`) ? raw[colIndex] ?? "" : "");
+  });
 }
 
 function clearTableHighlight(table) {
@@ -660,9 +756,11 @@ processButton.addEventListener("click", async () => {
       copyImageButton.dataset.imageUrl = payload.combinedImageUrl;
     }
     downloadCard.hidden = false;
+    renderScreenshotCheck(payload.screenshotCheck);
     previewData = payload.previews || {};
     renderTable(sheet2Table, previewData.sheet2 || [], true);
-    renderTable(sheet3Table, previewData.sheet3 || [], false);
+    renderTable(sheet3Table, previewData.sheet3 || [], false, { selectable: true });
+    setSheet3SelectionMode(false);
     previewSection.hidden = false;
     const warnings = payload.warnings || [];
     if (warnings.length) {
@@ -703,6 +801,10 @@ document.addEventListener("keydown", (event) => {
 document.addEventListener("click", (event) => {
   const cell = event.target.closest(".preview-section td");
   if (cell) {
+    if (sheet3SelectionMode && cell.closest("#sheet3Table")) {
+      toggleSheet3Cell(cell);
+      return;
+    }
     applyCrossHighlight(cell);
     return;
   }
@@ -718,9 +820,40 @@ document.querySelectorAll("#useThousands, #crossHighlight, #rateMetricsAsPercent
   control.addEventListener("change", () => {
     if (!previewSection.hidden) {
       renderTable(sheet2Table, previewData.sheet2 || [], true);
-      renderTable(sheet3Table, previewData.sheet3 || [], false);
+      renderTable(sheet3Table, previewData.sheet3 || [], false, { selectable: true });
+      setSheet3SelectionMode(false);
     }
   });
+});
+
+sheet3SelectButton.addEventListener("click", () => {
+  setSheet3SelectionMode(!sheet3SelectionMode);
+  message.textContent = sheet3SelectionMode ? "已进入 Sheet3 选择模式，点击想复制的单元格。" : "已退出 Sheet3 选择模式。";
+});
+
+sheet3ClearSelectionButton.addEventListener("click", () => {
+  clearSheet3Selection();
+  message.textContent = "已清除 Sheet3 选中单元格。";
+});
+
+sheet3CopySelectedButton.addEventListener("click", async () => {
+  try {
+    const manualText = String(window.getSelection?.().toString() || "").trim();
+    if (manualText) {
+      await navigator.clipboard.writeText(manualText);
+      message.textContent = "已复制手动选中的内容。";
+      return;
+    }
+    const rows = selectedSheet3Rows();
+    if (!rows.length) {
+      message.textContent = "请先在 Sheet3 中选中要复制的单元格。";
+      return;
+    }
+    await navigator.clipboard.writeText(rowsToTsv(rows));
+    message.textContent = "已复制 Sheet3 选中单元格。";
+  } catch (error) {
+    message.textContent = friendlyErrorText(error, "复制选中内容失败。");
+  }
 });
 
 refreshOcrStatus();

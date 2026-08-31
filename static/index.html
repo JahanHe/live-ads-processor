@@ -227,6 +227,18 @@
           <ul id="warningsList"></ul>
         </section>
 
+        <section class="check-card" id="screenshotCheckCard" hidden>
+          <div class="check-heading">
+            <div>
+              <span class="label">截图核对</span>
+              <strong id="screenshotCheckTitle">截图与表格数据核对</strong>
+            </div>
+            <span class="check-status" id="screenshotCheckStatus"></span>
+          </div>
+          <p id="screenshotCheckMessage"></p>
+          <div class="check-grid" id="screenshotCheckGrid"></div>
+        </section>
+
         <section class="preview-section" id="previewSection" hidden>
           <div class="preview-card">
             <div class="preview-heading">
@@ -251,6 +263,9 @@
                 <strong>结算整理表</strong>
               </div>
               <div class="preview-actions">
+                <button class="copy-button" id="sheet3SelectButton" type="button">选择单元格</button>
+                <button class="copy-button" id="sheet3CopySelectedButton" type="button">复制选中</button>
+                <button class="copy-button" id="sheet3ClearSelectionButton" type="button">清除选择</button>
                 <button class="copy-button" data-copy="sheet3-all" type="button">复制全部</button>
                 <button class="copy-button" data-copy="sheet3-body" type="button">复制去表头</button>
               </div>

@@ -55,8 +55,10 @@ def summarize_rows(rows):
         "deal_amount": sum(to_number(row.get("总成交金额")) for row in rows),
         "order_amount": sum(to_number(row.get("总下单金额")) for row in rows),
         "deal_orders": sum(to_number(row.get("总成交订单数")) for row in rows),
+        "order_orders": sum(to_number(row.get("总下单订单数")) for row in rows),
     }
     totals["deal_roi"] = totals["deal_amount"] / totals["spend_yuan"] if totals["spend_yuan"] else 0
+    totals["order_roi"] = totals["order_amount"] / totals["spend_yuan"] if totals["spend_yuan"] else 0
     return totals
 
 
@@ -199,6 +201,163 @@ def parse_long_plan_ocr_text(text):
         result["下单GMV"] = order_numbers[3]
         result["下单订单数"] = order_numbers[5]
     return result
+
+
+def normalize_ocr_text(text):
+    normalized = re.sub(r"\s+", "", str(text or "")).replace("￥", "¥").replace("ROL", "ROI")
+    replacements = {
+        "下单ROl": "下单ROI",
+        "成交ROl": "成交ROI",
+        "下单R0I": "下单ROI",
+        "成交R0I": "成交ROI",
+        "订羊数": "订单数",
+        "订単数": "订单数",
+    }
+    for wrong, right in replacements.items():
+        normalized = normalized.replace(wrong, right)
+    return normalized
+
+
+def merge_metrics(base, extra):
+    return {key: base.get(key) if base.get(key) is not None else value for key, value in extra.items()}
+
+
+CHECK_LABELS = [
+    ("spend_yuan", ["消耗金额"]),
+    (None, ["平均千次展示费用"]),
+    (None, ["直接下单金额"]),
+    (None, ["直接下单ROI"]),
+    (None, ["直接成交金额"]),
+    (None, ["直接成交ROI"]),
+    (None, ["直接下单订单数"]),
+    (None, ["直接成交订单数"]),
+    ("order_amount", ["当场下单金额", "下单金额"]),
+    ("order_roi", ["当场下单ROI", "下单ROI"]),
+    ("order_orders", ["当场下单订单数", "下单订单数"]),
+    ("deal_amount", ["当场成交金额", "成交金额"]),
+    ("deal_roi", ["当场成交ROI", "成交ROI"]),
+    ("deal_orders", ["当场成交订单数", "成交订单数"]),
+]
+
+
+def find_check_labels(line):
+    found = []
+    for key, labels in CHECK_LABELS:
+        for label in labels:
+            for match in re.finditer(re.escape(label), line):
+                prefix = line[max(0, match.start() - 2) : match.start()]
+                if len(label) <= 5 and prefix in {"直接", "当场"}:
+                    continue
+                found.append((match.start(), key, label))
+                break
+            if found and found[-1][1] == key and found[-1][2] == label:
+                break
+    return sorted(found, key=lambda item: item[0])
+
+
+def same_line_ocr_metrics(text):
+    metrics = {key: None for key, _ in CHECK_LABELS if key}
+    for line in str(text or "").splitlines():
+        normalized = normalize_ocr_text(line)
+        for label_pos, key, label in find_check_labels(normalized):
+            if key is None:
+                continue
+            tail = normalized[label_pos + len(label) :]
+            match = re.search(r"^\s*[①ⓘiI〇O0]*\s*¥?([0-9][0-9,]*(?:\.[0-9]+)?)", tail)
+            if match:
+                metrics[key] = to_number(match.group(1))
+    return metrics
+
+
+def line_number_positions(line):
+    return [(match.start(), to_number(match.group(1))) for match in re.finditer(r"[¥￥]?\s*([0-9][0-9,]*(?:\.[0-9]+)?)", line)]
+
+
+def screenshot_metrics_from_layout(text):
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    normalized = [normalize_ocr_text(line) for line in lines]
+    metrics = {key: None for key, _ in CHECK_LABELS if key}
+    for index, line in enumerate(normalized[:-1]):
+        found_labels = find_check_labels(line)
+        if len(found_labels) < 2:
+            continue
+        values = [value for _, value in line_number_positions(lines[index + 1])]
+        if not values:
+            continue
+        if metrics["spend_yuan"] is None and "平均千次展示费用" in line and len(values) >= 2:
+            metrics["spend_yuan"] = values[0]
+        for value_index, (_, key, _) in enumerate(found_labels):
+            if key is None or value_index >= len(values):
+                continue
+            metrics[key] = values[value_index]
+    return metrics
+
+
+def screenshot_metrics_from_text(text):
+    return merge_metrics(screenshot_metrics_from_layout(text), same_line_ocr_metrics(text))
+
+
+def metric_matches(table_value, screenshot_value, metric_key):
+    if screenshot_value is None:
+        return None
+    tolerance = 0.05 if metric_key.endswith("_amount") or metric_key == "spend_yuan" else 0.001
+    if metric_key.endswith("_orders"):
+        tolerance = 0
+    return abs(float(table_value or 0) - float(screenshot_value or 0)) <= tolerance
+
+
+def screenshot_table_check(rows, image_paths):
+    if not image_paths:
+        return {"status": "none", "message": "未导入截图，未执行截图核对。", "items": []}
+    tesseract = tesseract_path()
+    if not tesseract:
+        return {"status": "unavailable", "message": "截图识别组件未安装，暂不能自动核对截图数据。", "items": []}
+    texts = []
+    for image_path in image_paths:
+        result = subprocess.run(
+            [tesseract, str(image_path), "stdout", "-l", "chi_sim+eng", "--psm", "6"],
+            check=False,
+            capture_output=True,
+            env=tesseract_env(),
+            text=True,
+            timeout=20,
+        )
+        if result.returncode == 0:
+            texts.append(result.stdout)
+    if not texts:
+        return {"status": "unavailable", "message": "截图已插入，但 OCR 没有识别出可核对的文字。", "items": []}
+    table = summarize_rows(rows)
+    screenshot = screenshot_metrics_from_text("\n".join(texts))
+    specs = [
+        ("消耗金额", "spend_yuan"),
+        ("当场下单金额", "order_amount"),
+        ("当场下单 ROI", "order_roi"),
+        ("当场下单订单数", "order_orders"),
+        ("当场成交金额", "deal_amount"),
+        ("当场成交 ROI", "deal_roi"),
+        ("当场成交订单数", "deal_orders"),
+    ]
+    items = []
+    for label, key in specs:
+        matched = metric_matches(table.get(key), screenshot.get(key), key)
+        items.append(
+            {
+                "label": label,
+                "tableValue": table.get(key),
+                "screenshotValue": screenshot.get(key),
+                "match": matched,
+            }
+        )
+    comparable = [item for item in items if item["match"] is not None]
+    mismatches = [item for item in comparable if not item["match"]]
+    if not comparable:
+        return {"status": "unavailable", "message": "截图已插入，但未识别到可核对的核心指标。", "items": items}
+    if mismatches:
+        return {"status": "mismatch", "message": f"发现 {len(mismatches)} 个字段和截图不一致，请检查导出的数据范围。", "items": items}
+    missing_count = len(items) - len(comparable)
+    if missing_count:
+        return {"status": "partial", "message": f"已核对 {len(comparable)} 个字段，未识别到 {missing_count} 个字段。", "items": items}
+    return {"status": "matched", "message": "截图可见核心数据和表格汇总一致。", "items": items}
 
 
 def tesseract_path():
@@ -448,8 +607,6 @@ class AppHandler(BaseHTTPRequestHandler):
             rows.extend(manual_long_rows)
             output_name = safe_xlsx_name(custom_output_name or default_output_stem(rows))
             output_path = job_dir / output_name
-            combined_image_name = f"{Path(output_name).stem}_拼接图.png"
-            combined_image_path = job_dir / combined_image_name
             result = build_workbook(
                 temp_csvs,
                 output_path,
@@ -458,13 +615,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 transpose_summary=transpose_summary,
                 remove_zero_columns=remove_zero_columns,
                 image_paths=temp_images,
-                combined_image_path=combined_image_path,
                 rate_metrics_as_percent=rate_metrics_as_percent,
                 long_plan_paths=temp_long_plans,
                 long_plan_rows=manual_long_rows,
             )
             warnings = warnings or result.get("warnings", [])
             summary = summarize_rows(rows)
+            screenshot_check = screenshot_table_check(rows, temp_images)
             previews = {
                 "sheet2": sheet_preview(output_path, "数据汇总"),
                 "sheet3": sheet_preview(output_path, "结算整理表"),
@@ -485,10 +642,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 "fileName": output_name,
                 "downloadUrl": f"/download/{job_id}/{quote(output_name)}",
                 "summary": summary,
+                "screenshotCheck": screenshot_check,
                 "previews": previews,
                 "warnings": warnings,
-                "combinedImageUrl": f"/image/{job_id}/{quote(combined_image_name)}" if result.get("combined_image") else "",
-                "combinedImageName": combined_image_name if result.get("combined_image") else "",
+                "combinedImageUrl": "",
+                "combinedImageName": "",
             }
         )
 
