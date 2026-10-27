@@ -64,6 +64,9 @@ pip install -r requirements.txt
 - 界面统一为中性灰工作区、白色内容区、蓝色主操作；矩形控件统一 8px 圆角，操作按钮最小 44px 点击高度。
 - 常用按钮至少 44px 点击高度；支持键盘焦点、按下反馈和减少动态效果。
 - 截图核对按表头与数字的实际位置配对，小截图先在本地放大识别，不改变导出的原截图。直接、当场、净成交不混比；未检出表头、数字未识别、截图数值冲突分别提示，只有同口径数字不同才算差异。OCR 超时或失败不影响表格生成。
+- 从订单编号提取的日期统一按北京时间解释，不随电脑时区偏移。
+
+本次 v2.3.5 仅发布 M 系列 Mac 安装包；Windows 保留 v2.3.4，不发布新版 EXE。
 
 设计参考：[Apple Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons)、[Windows](https://developer.apple.com/design/human-interface-guidelines/windows)、[Layout](https://developer.apple.com/design/human-interface-guidelines/layout)、[Materials](https://developer.apple.com/design/human-interface-guidelines/materials)。当前仍为 Electron 界面，不是原生 AppKit 控件。
 
@@ -80,7 +83,7 @@ https://github.com/JahanHe/live-ads-processor/releases
 Windows 用户下载：
 
 ```text
-live-ads-processor-windows-v2.3.5.exe
+live-ads-processor-windows-v2.3.4.exe
 ```
 
 详细步骤见：

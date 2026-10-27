@@ -240,9 +240,9 @@ def date_from_order_info(value):
     if not match:
         return ""
     try:
-        from datetime import datetime
+        from datetime import datetime, timedelta, timezone
 
-        date = datetime.fromtimestamp(int(match.group(1)))
+        date = datetime.fromtimestamp(int(match.group(1)), tz=timezone(timedelta(hours=8)))
         return f"{date.year}年{date.month}月{date.day}日"
     except Exception:
         return ""
