@@ -315,7 +315,11 @@ def screenshot_number(text):
 
 def parse_screenshot_tsv(text):
     lines = {}
-    for word in csv.DictReader(io.StringIO(text), delimiter="\t"):
+    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
+    required = {"level", "page_num", "block_num", "par_num", "line_num", "left", "top", "width", "height", "conf", "text"}
+    if not required.issubset(reader.fieldnames or []):
+        raise RuntimeError("识别组件没有返回文字位置信息，暂时无法核对截图。")
+    for word in reader:
         if word.get("level") != "5" or not word.get("text", "").strip():
             continue
         key = tuple(word[name] for name in ("page_num", "block_num", "par_num", "line_num"))
@@ -412,7 +416,7 @@ def read_screenshot_metrics(image_path):
         for path in paths:
             try:
                 result = subprocess.run(
-                    [tesseract_path(), str(path), "stdout", "-l", "chi_sim+eng", "--psm", "11", "tsv"],
+                    [tesseract_path(), str(path), "stdout", "-l", "chi_sim+eng", "--psm", "11", "-c", "tessedit_create_tsv=1"],
                     check=False, capture_output=True, env=tesseract_env(),
                     text=True, encoding="utf-8", errors="replace", timeout=25,
                 )

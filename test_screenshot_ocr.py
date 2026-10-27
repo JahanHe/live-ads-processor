@@ -21,6 +21,10 @@ def tsv_lines(lines):
 
 
 class ScreenshotOcrTests(unittest.TestCase):
+    def test_missing_position_output_is_an_engine_error(self):
+        with self.assertRaisesRegex(RuntimeError, "文字位置信息"):
+            parse_screenshot_tsv("消耗金额\n100.25\n")
+
     def test_positions_survive_unknown_headers_and_reordered_cards(self):
         lines = [
             ("数据汇总", 10, 10, 80, 20),
@@ -95,6 +99,8 @@ class ScreenshotOcrTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         for call in run.call_args_list:
             self.assertFalse(Path(call.args[0][1]).exists())
+            self.assertIn("tessedit_create_tsv=1", call.args[0])
+            self.assertNotIn("tsv", call.args[0])
 
     @patch("web_app.tesseract_path", return_value="tesseract")
     @patch("web_app.read_screenshot_metrics")
