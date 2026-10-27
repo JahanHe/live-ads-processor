@@ -50,7 +50,6 @@ const longPlanPanel = document.querySelector(".long-plan-panel");
 const settingsPanel = document.querySelector("#settingsPanel");
 const toggleLongPlan = document.querySelector("#toggleLongPlan");
 const toggleSettings = document.querySelector("#toggleSettings");
-const settlementPreview = document.querySelector("#settlementPreview");
 const longPlanOcrStatus = document.querySelector("#longPlanOcrStatus");
 const ocrPreviewPanel = document.querySelector("#ocrPreviewPanel");
 const ocrPreviewImage = document.querySelector("#ocrPreviewImage");
@@ -199,7 +198,7 @@ function setScreenshots() {
   screenshotFiles.forEach((file, index) => {
     const card = document.createElement("div");
     card.className = "thumb-card";
-    card.innerHTML = '<button class="thumb-image-button" type="button"><img></button><div class="thumb-meta"><span></span><button class="thumb-remove" type="button">移除</button></div>';
+    card.innerHTML = '<button class="thumb-image-button" type="button"><img></button><div class="thumb-meta"><span></span><button class="thumb-remove" data-icon="x" type="button">移除</button></div>';
     const previewButton = card.querySelector(".thumb-image-button");
     previewButton.dataset.previewScreenshot = index;
     previewButton.setAttribute("aria-label", `放大查看 ${file.name}`);
@@ -444,13 +443,15 @@ function renderScreenshotCheck(check) {
   screenshotCheckStatus.className = `check-status is-${check.status || "unknown"}`;
   screenshotCheckMessage.textContent = check.message || "";
   screenshotCheckGrid.innerHTML = (check.items || []).map((item) => {
-    const state = item.match === true ? "一致" : item.match === false ? "不一致" : "未识别";
+    const pending = { label_missing: "未检出同名表头", number_missing: "数字未识别", conflict: "截图数值冲突" };
+    const state = item.match === true ? "一致" : item.match === false ? "不一致" : (pending[item.reason] || "未识别");
     const stateClass = item.match === true ? "is-match" : item.match === false ? "is-mismatch" : "is-missing";
+    const screenshotValue = item.screenshotValue === null || item.screenshotValue === undefined ? state : formatCheckValue(item.screenshotValue, item.label);
     return `
       <article class="check-item ${stateClass}">
         <span>${item.label}</span>
         <strong>${state}</strong>
-        <small>表格：${formatCheckValue(item.tableValue, item.label)} ｜ 截图：${formatCheckValue(item.screenshotValue, item.label)}</small>
+        <small>表格：${formatCheckValue(item.tableValue, item.label)} ｜ 截图：${screenshotValue}</small>
       </article>
     `;
   }).join("");
@@ -868,8 +869,8 @@ processButton.addEventListener("click", async () => {
       warningsCard.hidden = false;
     }
     message.textContent = "XLSX 已生成，数据汇总已按当前面板设置处理。";
-    settlementPreview.focus({ preventScroll: true });
-    settlementPreview.scrollIntoView({
+    metrics.focus({ preventScroll: true });
+    metrics.scrollIntoView({
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
       block: "start",
     });

@@ -109,8 +109,8 @@ async function createWindow() {
     minHeight: 720,
     title: "",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: "#faf9f5",
+    trafficLightPosition: { x: 20, y: 28 },
+    backgroundColor: "#f5f5f7",
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

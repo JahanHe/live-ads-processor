@@ -54,18 +54,20 @@ pip install -r requirements.txt
 
 ## v2.3.5 操作界面
 
-基于 v2.3.4 更新，不改变表格计算和截图核对口径。
+基于 v2.3.4 更新，不改变表格计算口径。
 
 - 移除页面大标题，截图直接显示在导入框内，保留放大和逐张移除。
 - 长期计划与功能设置收为同一行的小入口，默认收起。
-- 顶部常驻生成按钮；生成后定位到结算整理表。
+- 顶部常驻生成按钮；生成后定位到数据概览，下方依次显示下载入口和结算整理表，避开固定顶栏。
 - `清空重来` 清除本轮导入资料、手填数据、预览和导出结果，恢复默认设置，不删除原始文件或已下载文件。进行中的旧响应不会重新填回页面。
-- macOS 顶部预留 52px 模糊拖动区，与按钮点击区分开。
-- 常用按钮至少 44px 点击高度，生成操作 48px；支持键盘焦点、按下反馈和减少动态效果。
+- macOS 顶部使用 72px 模糊工具栏，保留系统红绿灯与空白拖动区，按钮区域正常点击。
+- 界面统一为中性灰工作区、白色内容区、蓝色主操作；矩形控件统一 8px 圆角，操作按钮最小 44px 点击高度。
+- 常用按钮至少 44px 点击高度；支持键盘焦点、按下反馈和减少动态效果。
+- 截图核对按表头与数字的实际位置配对，小截图先在本地放大识别，不改变导出的原截图。直接、当场、净成交不混比；未检出表头、数字未识别、截图数值冲突分别提示，只有同口径数字不同才算差异。OCR 超时或失败不影响表格生成。
 
 设计参考：[Apple Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons)、[Windows](https://developer.apple.com/design/human-interface-guidelines/windows)、[Layout](https://developer.apple.com/design/human-interface-guidelines/layout)、[Materials](https://developer.apple.com/design/human-interface-guidelines/materials)。当前仍为 Electron 界面，不是原生 AppKit 控件。
 
-本地回归：`python -m unittest test_spend_conversion.py`。启动服务后，可用安装有 Playwright 的 Node 环境运行 `node test_panel.cjs http://127.0.0.1:8781`，默认使用本机 Chrome。测试使用合成数据，不上传用户业务资料。
+本地回归：`python -m unittest test_spend_conversion.py test_screenshot_ocr.py`。启动服务后，可用安装有 Playwright 的 Node 环境运行 `node test_panel.cjs http://127.0.0.1:8781`，默认使用本机 Chrome。测试使用合成数据，不上传用户业务资料。
 
 ## Windows 桌面版 EXE
 

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import cgi
+import csv
+import io
 import json
 import mimetypes
 import os
@@ -11,6 +13,7 @@ import sys
 import tempfile
 import threading
 import uuid
+import unicodedata
 import webbrowser
 import zipfile
 from http import HTTPStatus
@@ -19,7 +22,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from openpyxl import load_workbook
-from PIL import Image
+from PIL import Image, ImageOps
 
 from process_live_ads import (
     build_workbook,
@@ -204,7 +207,7 @@ def parse_long_plan_ocr_text(text):
 
 
 def normalize_ocr_text(text):
-    normalized = re.sub(r"\s+", "", str(text or "")).replace("￥", "¥").replace("ROL", "ROI")
+    normalized = re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(text or ""))).replace("￥", "¥").replace("ROL", "ROI")
     replacements = {
         "下单ROl": "下单ROI",
         "成交ROl": "成交ROI",
@@ -231,6 +234,7 @@ CHECK_LABELS = [
     (None, ["直接成交ROI"]),
     (None, ["直接下单订单数"]),
     (None, ["直接成交订单数"]),
+    (None, ["净成交金额", "净成交ROI", "净成交订单数"]),
     ("order_amount", ["当场下单金额", "下单金额"]),
     ("order_roi", ["当场下单ROI", "下单ROI"]),
     ("order_orders", ["当场下单订单数", "下单订单数"]),
@@ -297,10 +301,143 @@ def screenshot_metrics_from_text(text):
     return merge_metrics(screenshot_metrics_from_layout(text), same_line_ocr_metrics(text))
 
 
+def screenshot_number(text):
+    text = normalize_ocr_text(text).replace("，", ",")
+    # Currency glyphs are sometimes read as Y; a currency-prefixed O is zero.
+    currency = text.startswith(("¥", "Y"))
+    text = re.sub(r"^[¥Y]", "", text)
+    if not re.fullmatch(r"[0-9O]+(?:,[0-9O]{3})*(?:\.[0-9O]+)?", text):
+        return None
+    if text == "O" and not currency:
+        return None
+    return float(text.replace(",", "").replace("O", "0"))
+
+
+def parse_screenshot_tsv(text):
+    lines = {}
+    for word in csv.DictReader(io.StringIO(text), delimiter="\t"):
+        if word.get("level") != "5" or not word.get("text", "").strip():
+            continue
+        key = tuple(word[name] for name in ("page_num", "block_num", "par_num", "line_num"))
+        lines.setdefault(key, []).append({
+            "text": word["text"], "x": int(word["left"]), "y": int(word["top"]),
+            "w": int(word["width"]), "h": int(word["height"]), "confidence": float(word["conf"]),
+        })
+
+    blocks = []
+    for words in lines.values():
+        chunks = []
+        for word in sorted(words, key=lambda item: item["x"]):
+            if not chunks or word["x"] - max(w["x"] + w["w"] for w in chunks[-1]) > 2 * max(word["h"], max(w["h"] for w in chunks[-1])):
+                chunks.append([])
+            chunks[-1].append(word)
+        for chunk in chunks:
+            x, y = min(w["x"] for w in chunk), min(w["y"] for w in chunk)
+            blocks.append({
+                "text": normalize_ocr_text("".join(w["text"] for w in chunk)),
+                "x": x, "y": y,
+                "w": max(w["x"] + w["w"] for w in chunk) - x,
+                "h": max(w["y"] + w["h"] for w in chunk) - y,
+                "confidence": sum(w["confidence"] for w in chunk) / len(chunk),
+            })
+    blocks.sort(key=lambda b: (b["y"], b["x"]))
+    starts = [b["y"] for b in blocks if b["text"] == "数据汇总"]
+    start = min(starts) if starts else 0
+    ends = [b["y"] for b in blocks if b["y"] > start and b["text"] in {"指标对比", "转化漏斗", "数据明细"}]
+    end = min(ends) if ends else float("inf")
+    blocks = [b for b in blocks if start <= b["y"] < end]
+
+    def aligned(label, value):
+        tolerance = max(label["h"], value["h"]) * 1.8
+        return min(abs(label["x"] - value["x"]), abs(label["x"] + label["w"] / 2 - value["x"] - value["w"] / 2)) <= tolerance
+
+    records = {}
+    for block in blocks:
+        # The longest header wins. A suffix like 成交金额 must not match 直接成交金额.
+        labels = [(key, label) for key, aliases in CHECK_LABELS for label in aliases if block["text"].startswith(label)]
+        if not labels:
+            continue
+        key, label = max(labels, key=lambda pair: len(pair[1]))
+        if key is None:
+            continue
+        tail = block["text"][len(label):].lstrip(":：")
+        value = screenshot_number(tail) if re.match(r"[¥Y0-9]", tail) else None
+        if value is None:
+            candidates = []
+            for number in blocks:
+                gap = number["y"] - block["y"] - block["h"]
+                if not (-block["h"] * 0.15 <= gap <= block["h"] * 4) or not aligned(block, number):
+                    continue
+                parsed = screenshot_number(number["text"])
+                if parsed is None or number["confidence"] < 50:
+                    continue
+                # A new label or placeholder in this column terminates the search.
+                if any(other is not block and other is not number and block["y"] + block["h"] <= other["y"] < number["y"]
+                       and aligned(block, other) and screenshot_number(other["text"]) is None for other in blocks):
+                    continue
+                candidates.append((gap, abs(block["x"] - number["x"]), parsed))
+            if candidates:
+                candidates.sort()
+                value = candidates[0][2]
+                if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < block["h"] / 2 and candidates[0][2] != candidates[1][2]:
+                    value = None
+        if key.endswith("_orders") and value is not None and not value.is_integer():
+            value = None
+        record = {"label": label, "value": value}
+        previous = records.get(key)
+        if previous and previous.get("conflict"):
+            continue
+        if previous and previous["value"] is not None:
+            if value is not None and previous["value"] != value:
+                record.update(value=None, conflict=True)
+            else:
+                record = previous
+        records[key] = record
+    return records
+
+
+def read_screenshot_metrics(image_path):
+    records = {}
+    with tempfile.TemporaryDirectory(prefix="live_ads_check_") as directory:
+        paths = [Path(image_path).resolve()]
+        with Image.open(image_path) as source:
+            # Only OCR copies are enlarged; the workbook keeps the original screenshot.
+            if source.width < 1800 and source.width * source.height <= 4_000_000:
+                enlarged = ImageOps.autocontrast(source.convert("L")).resize(
+                    (source.width * 2, source.height * 2), Image.Resampling.LANCZOS,
+                )
+                paths = [Path(directory).resolve() / "enlarged.png", Path(directory).resolve() / "contrast.png"]
+                enlarged.save(paths[0])
+                enlarged.point(lambda value: 255 if value > 190 else 0).save(paths[1])
+        for path in paths:
+            try:
+                result = subprocess.run(
+                    [tesseract_path(), str(path), "stdout", "-l", "chi_sim+eng", "--psm", "11", "tsv"],
+                    check=False, capture_output=True, env=tesseract_env(),
+                    text=True, encoding="utf-8", errors="replace", timeout=25,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError("截图识别失败，请检查本地识别组件和中文语言包。")
+                recognized = parse_screenshot_tsv(result.stdout)
+            except (subprocess.TimeoutExpired, OSError, RuntimeError, ValueError, csv.Error):
+                if records:
+                    break
+                raise
+            for key, record in recognized.items():
+                previous = records.get(key)
+                if previous and previous.get("conflict"):
+                    continue
+                if record.get("conflict") or (previous and previous["value"] is not None and record["value"] is not None and previous["value"] != record["value"]):
+                    records[key] = {"label": record["label"], "value": None, "conflict": True}
+                elif not previous or previous["value"] is None:
+                    records[key] = record
+    return records
+
+
 def metric_matches(table_value, screenshot_value, metric_key):
     if screenshot_value is None:
         return None
-    tolerance = 0.05 if metric_key.endswith("_amount") or metric_key == "spend_yuan" else 0.001
+    tolerance = 0.010000001 if metric_key.endswith("_amount") or metric_key == "spend_yuan" else 0.000100001
     if metric_key.endswith("_orders"):
         tolerance = 0
     return abs(float(table_value or 0) - float(screenshot_value or 0)) <= tolerance
@@ -312,22 +449,25 @@ def screenshot_table_check(rows, image_paths):
     tesseract = tesseract_path()
     if not tesseract:
         return {"status": "unavailable", "message": "截图识别组件未安装，暂不能自动核对截图数据。", "items": []}
-    texts = []
+    records = {}
+    conflicts = set()
+    errors = []
     for image_path in image_paths:
-        result = subprocess.run(
-            [tesseract, str(image_path), "stdout", "-l", "chi_sim+eng", "--psm", "6"],
-            check=False,
-            capture_output=True,
-            env=tesseract_env(),
-            text=True,
-            timeout=20,
-        )
-        if result.returncode == 0:
-            texts.append(result.stdout)
-    if not texts:
-        return {"status": "unavailable", "message": "截图已插入，但 OCR 没有识别出可核对的文字。", "items": []}
+        try:
+            recognized = read_screenshot_metrics(image_path)
+        except subprocess.TimeoutExpired:
+            errors.append("有截图识别超时，未参与核对。")
+            continue
+        except (OSError, RuntimeError, ValueError, csv.Error):
+            errors.append("有截图识别失败，请检查本地识别组件和中文语言包。")
+            continue
+        for key, record in recognized.items():
+            previous = records.get(key)
+            if record.get("conflict") or (previous and previous["value"] is not None and record["value"] is not None and previous["value"] != record["value"]):
+                conflicts.add(key)
+            if not previous or previous["value"] is None:
+                records[key] = record
     table = summarize_rows(rows)
-    screenshot = screenshot_metrics_from_text("\n".join(texts))
     specs = [
         ("消耗金额", "spend_yuan"),
         ("当场下单金额", "order_amount"),
@@ -339,24 +479,31 @@ def screenshot_table_check(rows, image_paths):
     ]
     items = []
     for label, key in specs:
-        matched = metric_matches(table.get(key), screenshot.get(key), key)
+        record = records.get(key)
+        value = record.get("value") if record and key not in conflicts else None
+        matched = metric_matches(table.get(key), value, key)
+        reason = "conflict" if key in conflicts else "label_missing" if not record else "number_missing" if value is None else ""
         items.append(
             {
+                "key": key,
                 "label": label,
+                "screenshotLabel": record["label"] if record else None,
+                "reason": reason,
                 "tableValue": table.get(key),
-                "screenshotValue": screenshot.get(key),
+                "screenshotValue": value,
                 "match": matched,
             }
         )
     comparable = [item for item in items if item["match"] is not None]
     mismatches = [item for item in comparable if not item["match"]]
+    note = " " + " ".join(dict.fromkeys(errors)) if errors else ""
     if not comparable:
-        return {"status": "unavailable", "message": "截图已插入，但未识别到可核对的核心指标。", "items": items}
+        return {"status": "unavailable", "message": "截图已插入，未找到可可靠核对的同名指标；未检出项不算数据差异。" + note, "items": items}
     if mismatches:
-        return {"status": "mismatch", "message": f"发现 {len(mismatches)} 个字段和截图不一致，请检查导出的数据范围。", "items": items}
+        return {"status": "mismatch", "message": f"已核对 {len(comparable)} 个同口径指标，其中 {len(mismatches)} 个数值不一致；其余未核对项不计入差异。" + note, "items": items}
     missing_count = len(items) - len(comparable)
-    if missing_count:
-        return {"status": "partial", "message": f"已核对 {len(comparable)} 个字段，未识别到 {missing_count} 个字段。", "items": items}
+    if missing_count or errors:
+        return {"status": "partial", "message": f"已核对 {len(comparable)} 个同口径指标且数值一致，另有 {missing_count} 个指标待核对。" + note, "items": items}
     return {"status": "matched", "message": "截图可见核心数据和表格汇总一致。", "items": items}
 
 

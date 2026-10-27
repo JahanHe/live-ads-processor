@@ -48,6 +48,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Test data processing and screenshot reconciliation
+        run: python -m unittest test_spend_conversion.py test_screenshot_ocr.py
+
       - name: Build backend EXE
         run: pyinstaller --noconfirm --clean live_ads_processor.spec
 
@@ -59,7 +62,7 @@ jobs:
           }
 
       - name: Install Electron dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Electron desktop app
         run: npm run build:win -- --publish never

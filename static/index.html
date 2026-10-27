@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>直播投放处理器</title>
+    <link rel="stylesheet" href="/static/icons.css" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -12,8 +13,8 @@
       <section class="workspace">
         <div class="action-bar">
           <p class="message" id="message" role="status" aria-live="polite"></p>
-          <button class="secondary-button" id="resetWorkspaceButton" type="button">清空重来</button>
-          <button class="primary-button" id="processButton" type="button" disabled>生成表格</button>
+          <button class="secondary-button" id="resetWorkspaceButton" data-icon="restart" type="button">清空重来</button>
+          <button class="primary-button" id="processButton" data-icon="table" type="button" disabled>生成表格</button>
         </div>
         <section class="hero">
           <div class="upload-panel">
@@ -23,27 +24,27 @@
                 <div class="zone-heading"><h2>导入订单分析表</h2></div>
                 <div class="zone-content">
                   <div class="zone-empty">
-                    <div class="file-icon">XLS</div>
-                    <p id="fileHint">拖入一个或多个表格</p>
+                    <div class="file-icon" data-icon="spreadsheet" aria-hidden="true"></div>
+                    <p id="fileHint">CSV · Excel</p>
                   </div>
-                  <div class="selected-file" id="selectedFile" hidden>
+                  <div class="selected-file" id="selectedFile" data-icon="spreadsheet" hidden>
                     <strong id="fileName"></strong>
-                    <button class="text-button" id="clearButton" type="button">移除</button>
+                    <button class="text-button" id="clearButton" data-icon="x" type="button">移除</button>
                   </div>
                 </div>
-                <button class="secondary-button" id="chooseButton" type="button">选择表格</button>
+                <button class="secondary-button" id="chooseButton" data-icon="upload" type="button">选择表格</button>
               </div>
 
               <div class="dropzone screenshot-zone" id="screenshotZone">
                 <input id="screenshotInput" type="file" accept="image/*" multiple hidden />
                 <div class="zone-heading">
                   <h2>导入消耗截图</h2>
-                  <button class="text-button" id="clearScreenshotButton" type="button" hidden>清空截图</button>
+                  <button class="text-button" id="clearScreenshotButton" data-icon="trash" type="button" hidden>清空截图</button>
                 </div>
                 <div class="zone-content">
                   <div class="zone-empty">
-                    <div class="file-icon">IMG</div>
-                    <p id="screenshotHint">选择、拖入或粘贴截图</p>
+                    <div class="file-icon" data-icon="images" aria-hidden="true"></div>
+                    <p id="screenshotHint">消耗截图（选填）</p>
                   </div>
                   <div class="thumb-grid" id="screenshotThumbs" hidden></div>
                   <div class="paste-panel" id="pastePanel" hidden>
@@ -51,15 +52,15 @@
                   </div>
                 </div>
                 <div class="button-row">
-                  <button class="secondary-button" id="chooseScreenshotButton" type="button">选择截图</button>
-                  <button class="secondary-button" id="pasteScreenshotButton" type="button">粘贴截图</button>
+                  <button class="secondary-button" id="chooseScreenshotButton" data-icon="upload" type="button">选择截图</button>
+                  <button class="secondary-button" id="pasteScreenshotButton" data-icon="paste" type="button">粘贴截图</button>
                 </div>
               </div>
             </div>
 
             <div class="tools-row">
-              <button class="tool-toggle" id="toggleLongPlan" type="button" aria-expanded="false" aria-controls="longPlanPanel">长期计划数据行</button>
-              <button class="tool-toggle" id="toggleSettings" type="button" aria-expanded="false" aria-controls="settingsPanel">功能设置</button>
+              <button class="tool-toggle" id="toggleLongPlan" data-icon="row" type="button" aria-expanded="false" aria-controls="longPlanPanel">长期计划数据行</button>
+              <button class="tool-toggle" id="toggleSettings" data-icon="settings" type="button" aria-expanded="false" aria-controls="settingsPanel">功能设置</button>
             </div>
 
             <section class="long-plan-panel" id="longPlanPanel" aria-label="长期计划数据行" hidden>
@@ -69,10 +70,10 @@
                 </div>
                 <div class="button-row compact-row">
                   <input id="longPlanOcrInput" type="file" accept="image/*" hidden />
-                  <button class="secondary-button" id="ocrLongPlanButton" type="button">选择截图识别</button>
-                  <button class="secondary-button" id="ocrClipboardButton" type="button">粘贴截图识别</button>
-                  <button class="secondary-button install-button" id="installOcrButton" type="button" hidden>安装截图识别组件</button>
-                  <button class="secondary-button" id="clearLongPlanButton" type="button">清空</button>
+                  <button class="secondary-button" id="ocrLongPlanButton" data-icon="scan" type="button">选择截图识别</button>
+                  <button class="secondary-button" id="ocrClipboardButton" data-icon="paste" type="button">粘贴截图识别</button>
+                  <button class="secondary-button install-button" id="installOcrButton" data-icon="download" type="button" hidden>安装截图识别组件</button>
+                  <button class="secondary-button" id="clearLongPlanButton" data-icon="trash" type="button">清空</button>
                 </div>
               </div>
               <div class="long-plan-workspace">
@@ -94,7 +95,7 @@
                       <span class="label">识别截图</span>
                       <strong>对照右图检查数字</strong>
                     </div>
-                    <button class="thumb-remove" id="clearOcrPreviewButton" type="button">移除预览</button>
+                    <button class="thumb-remove" id="clearOcrPreviewButton" data-icon="x" type="button">移除预览</button>
                   </div>
                   <button class="image-preview-button" id="ocrPreviewButton" type="button" aria-label="放大查看识别截图">
                     <img id="ocrPreviewImage" alt="长期计划识别截图预览" />
@@ -158,7 +159,7 @@
                 <div class="option-item option-wide">
                   <div>
                     <strong>小数位</strong>
-                    <span>比例字段统一输出为小数</span>
+                    <span>数值显示精度</span>
                   </div>
                   <div class="segmented" role="group" aria-label="小数位">
                     <label>
@@ -182,7 +183,7 @@
           </div>
         </section>
 
-        <section class="metrics" id="metrics" hidden>
+        <section class="metrics" id="metrics" tabindex="-1" aria-label="数据概览" hidden>
           <article>
             <span>数据行数</span>
             <strong id="rowsMetric">0</strong>
@@ -207,9 +208,9 @@
             <strong id="outputName"></strong>
           </div>
           <div class="download-actions">
-            <a class="download-button" id="downloadLink" href="#">下载 XLSX</a>
-            <a class="download-button muted-download" id="imageDownloadLink" href="#" hidden>下载拼接图</a>
-            <button class="download-button muted-download" id="copyImageButton" type="button" hidden>复制拼接图</button>
+            <a class="download-button" id="downloadLink" data-icon="download" href="#">下载 XLSX</a>
+            <a class="download-button muted-download" id="imageDownloadLink" data-icon="download" href="#" hidden>下载拼接图</a>
+            <button class="download-button muted-download" id="copyImageButton" data-icon="copy" type="button" hidden>复制拼接图</button>
           </div>
         </section>
 
@@ -238,11 +239,11 @@
                 <strong>结算整理表</strong>
               </div>
               <div class="preview-actions">
-                <button class="copy-button" id="sheet3SelectButton" type="button">选择单元格</button>
-                <button class="copy-button" id="sheet3CopySelectedButton" type="button">复制选中</button>
-                <button class="copy-button" id="sheet3ClearSelectionButton" type="button">清除选择</button>
-                <button class="copy-button" data-copy="sheet3-all" type="button">复制全部</button>
-                <button class="copy-button" data-copy="sheet3-body" type="button" title="不含首行表头和第一列">复制数据区</button>
+                <button class="copy-button" id="sheet3SelectButton" data-icon="select" type="button">选择单元格</button>
+                <button class="copy-button" id="sheet3CopySelectedButton" data-icon="copy" type="button">复制选中</button>
+                <button class="copy-button" id="sheet3ClearSelectionButton" data-icon="x" type="button">清除选择</button>
+                <button class="copy-button" data-copy="sheet3-all" data-icon="copy" type="button">复制全部</button>
+                <button class="copy-button" data-copy="sheet3-body" data-icon="copy" type="button" title="不含首行表头和第一列">复制数据区</button>
               </div>
             </div>
             <div class="table-wrap">
@@ -257,8 +258,8 @@
                 <strong>数据汇总</strong>
               </div>
               <div class="preview-actions">
-                <button class="copy-button" data-copy="sheet2-all" type="button">复制全部</button>
-                <button class="copy-button" data-copy="sheet2-body" type="button" title="不含首行表头和第一列">复制数据区</button>
+                <button class="copy-button" data-copy="sheet2-all" data-icon="copy" type="button">复制全部</button>
+                <button class="copy-button" data-copy="sheet2-body" data-icon="copy" type="button" title="不含首行表头和第一列">复制数据区</button>
               </div>
             </div>
             <div class="table-wrap">
@@ -274,7 +275,7 @@
       <div class="lightbox-panel" role="dialog" aria-modal="true" aria-label="图片预览">
         <div class="lightbox-heading">
           <strong id="lightboxTitle">图片预览</strong>
-          <button class="secondary-button" id="closeLightboxButton" type="button">关闭</button>
+          <button class="secondary-button" id="closeLightboxButton" data-icon="x" type="button">关闭</button>
         </div>
         <img id="lightboxImage" alt="" />
       </div>
