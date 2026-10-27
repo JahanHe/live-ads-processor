@@ -3,34 +3,53 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>投放数据处理面板</title>
+    <title>直播投放处理器</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <div class="window-material" aria-hidden="true"></div>
     <main class="shell">
       <section class="workspace">
-        <div class="topbar">
-          <div>
-            <h1>投放数据处理面板</h1>
-          </div>
+        <div class="action-bar">
+          <p class="message" id="message" role="status" aria-live="polite"></p>
+          <button class="secondary-button" id="resetWorkspaceButton" type="button">清空重来</button>
+          <button class="primary-button" id="processButton" type="button" disabled>生成表格</button>
         </div>
-
         <section class="hero">
           <div class="upload-panel">
             <div class="upload-grid">
               <div class="dropzone" id="dropzone">
-                <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple />
-                <div class="file-icon">XLS</div>
-                <h2>导入订单分析表</h2>
-                <p id="fileHint">拖入一个或多个表格，或点击选择文件</p>
+                <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xlsm,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden />
+                <div class="zone-heading"><h2>导入订单分析表</h2></div>
+                <div class="zone-content">
+                  <div class="zone-empty">
+                    <div class="file-icon">XLS</div>
+                    <p id="fileHint">拖入一个或多个表格</p>
+                  </div>
+                  <div class="selected-file" id="selectedFile" hidden>
+                    <strong id="fileName"></strong>
+                    <button class="text-button" id="clearButton" type="button">移除</button>
+                  </div>
+                </div>
                 <button class="secondary-button" id="chooseButton" type="button">选择表格</button>
               </div>
 
               <div class="dropzone screenshot-zone" id="screenshotZone">
-                <input id="screenshotInput" type="file" accept="image/*" multiple />
-                <div class="file-icon">IMG</div>
-                <h2>导入消耗截图</h2>
-                <p id="screenshotHint">可选，支持选择、拖入或粘贴截图</p>
+                <input id="screenshotInput" type="file" accept="image/*" multiple hidden />
+                <div class="zone-heading">
+                  <h2>导入消耗截图</h2>
+                  <button class="text-button" id="clearScreenshotButton" type="button" hidden>清空截图</button>
+                </div>
+                <div class="zone-content">
+                  <div class="zone-empty">
+                    <div class="file-icon">IMG</div>
+                    <p id="screenshotHint">选择、拖入或粘贴截图</p>
+                  </div>
+                  <div class="thumb-grid" id="screenshotThumbs" hidden></div>
+                  <div class="paste-panel" id="pastePanel" hidden>
+                    <div class="paste-target" id="pasteTarget" tabindex="0" contenteditable="true" role="textbox" aria-label="粘贴截图区域">在这里按 Cmd+V / Ctrl+V 粘贴截图</div>
+                  </div>
+                </div>
                 <div class="button-row">
                   <button class="secondary-button" id="chooseScreenshotButton" type="button">选择截图</button>
                   <button class="secondary-button" id="pasteScreenshotButton" type="button">粘贴截图</button>
@@ -38,11 +57,14 @@
               </div>
             </div>
 
-            <details class="long-plan-panel">
-              <summary class="long-plan-heading">
+            <div class="tools-row">
+              <button class="tool-toggle" id="toggleLongPlan" type="button" aria-expanded="false" aria-controls="longPlanPanel">长期计划数据行</button>
+              <button class="tool-toggle" id="toggleSettings" type="button" aria-expanded="false" aria-controls="settingsPanel">功能设置</button>
+            </div>
+
+            <section class="long-plan-panel" id="longPlanPanel" aria-label="长期计划数据行" hidden>
+              <div class="long-plan-heading">
                 <div>
-                  <span class="label">长期计划数据行</span>
-                  <strong>可直接填写，也可从截图自动识别</strong>
                   <span class="inline-status" id="longPlanOcrStatus" role="status" aria-live="polite"></span>
                 </div>
                 <div class="button-row compact-row">
@@ -52,7 +74,7 @@
                   <button class="secondary-button install-button" id="installOcrButton" type="button" hidden>安装截图识别组件</button>
                   <button class="secondary-button" id="clearLongPlanButton" type="button">清空</button>
                 </div>
-              </summary>
+              </div>
               <div class="long-plan-workspace">
                 <div class="long-plan-grid">
                   <label>消耗总金额<input data-long-plan="消耗总金额" inputmode="decimal" /></label>
@@ -79,10 +101,9 @@
                   </button>
                 </aside>
               </div>
-            </details>
+            </section>
 
-            <details class="settings-panel">
-              <summary>功能设置</summary>
+            <section class="settings-panel" id="settingsPanel" aria-label="功能设置" hidden>
               <section class="options-panel">
                 <div class="option-item">
                   <div>
@@ -90,7 +111,7 @@
                     <span>指标纵向排列，投放目标横向对比</span>
                   </div>
                   <label class="switch">
-                    <input id="transposeSummary" type="checkbox" checked />
+                    <input id="transposeSummary" type="checkbox" aria-label="数据情况表转置" checked />
                     <span></span>
                   </label>
                 </div>
@@ -100,7 +121,7 @@
                     <span>例如 32,843、1,228.90</span>
                   </div>
                   <label class="switch">
-                    <input id="useThousands" type="checkbox" checked />
+                    <input id="useThousands" type="checkbox" aria-label="使用千分位" checked />
                     <span></span>
                   </label>
                 </div>
@@ -110,7 +131,7 @@
                     <span>分类列没有任何数据时不导出</span>
                   </div>
                   <label class="switch">
-                    <input id="removeZeroColumns" type="checkbox" checked />
+                    <input id="removeZeroColumns" type="checkbox" aria-label="删除全零列" checked />
                     <span></span>
                   </label>
                 </div>
@@ -120,7 +141,7 @@
                     <span>点击单元格定位对应行列</span>
                   </div>
                   <label class="switch">
-                    <input id="crossHighlight" type="checkbox" checked />
+                    <input id="crossHighlight" type="checkbox" aria-label="交叉高亮" checked />
                     <span></span>
                   </label>
                 </div>
@@ -130,7 +151,7 @@
                     <span>进入率、新增/场观、评论/场观</span>
                   </div>
                   <label class="switch">
-                    <input id="rateMetricsAsPercent" type="checkbox" checked />
+                    <input id="rateMetricsAsPercent" type="checkbox" aria-label="占比显示百分数" checked />
                     <span></span>
                   </label>
                 </div>
@@ -151,43 +172,13 @@
                   </div>
                 </div>
               </section>
-            </details>
-
-            <div class="paste-panel" id="pastePanel" hidden>
-              <div>
-                <span class="label">粘贴截图</span>
-                <strong>点击下方区域后按 Cmd+V / Ctrl+V</strong>
-              </div>
-              <div class="paste-target" id="pasteTarget" tabindex="0" contenteditable="true" role="textbox" aria-label="粘贴截图区域">
-                在这里粘贴剪切板截图
-              </div>
-            </div>
-
-            <div class="selected-file" id="selectedFile" hidden>
-              <div>
-                <span class="label">当前表格</span>
-                <strong id="fileName"></strong>
-              </div>
-              <button class="text-button" id="clearButton" type="button">移除</button>
-            </div>
-
-            <div class="selected-file" id="selectedScreenshots" hidden>
-              <div>
-                <span class="label">当前截图</span>
-                <strong id="screenshotName"></strong>
-              </div>
-              <button class="text-button" id="clearScreenshotButton" type="button">移除</button>
-            </div>
-            <div class="thumb-grid" id="screenshotThumbs" hidden></div>
+            </section>
 
             <div class="field-row">
               <label for="outputNameInput">导出文件名</label>
               <input id="outputNameInput" type="text" placeholder="默认：加热开始时间 + 加热主播 + 直播投放数据" />
             </div>
 
-            <button class="primary-button" id="processButton" type="button" disabled>
-              生成 XLSX
-            </button>
           </div>
         </section>
 
@@ -240,23 +231,7 @@
         </section>
 
         <section class="preview-section" id="previewSection" hidden>
-          <div class="preview-card">
-            <div class="preview-heading">
-              <div>
-                <span class="label">Sheet 2</span>
-                <strong>数据汇总</strong>
-              </div>
-              <div class="preview-actions">
-                <button class="copy-button" data-copy="sheet2-all" type="button">复制全部</button>
-                <button class="copy-button" data-copy="sheet2-body" type="button">复制去表头</button>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table id="sheet2Table"></table>
-            </div>
-          </div>
-
-          <div class="preview-card">
+          <div class="preview-card" id="settlementPreview" tabindex="-1">
             <div class="preview-heading">
               <div>
                 <span class="label">Sheet 3</span>
@@ -267,16 +242,30 @@
                 <button class="copy-button" id="sheet3CopySelectedButton" type="button">复制选中</button>
                 <button class="copy-button" id="sheet3ClearSelectionButton" type="button">清除选择</button>
                 <button class="copy-button" data-copy="sheet3-all" type="button">复制全部</button>
-                <button class="copy-button" data-copy="sheet3-body" type="button">复制去表头</button>
+                <button class="copy-button" data-copy="sheet3-body" type="button" title="不含首行表头和第一列">复制数据区</button>
               </div>
             </div>
             <div class="table-wrap">
               <table id="sheet3Table"></table>
             </div>
           </div>
-        </section>
 
-        <p class="message" id="message" role="status"></p>
+          <div class="preview-card">
+            <div class="preview-heading">
+              <div>
+                <span class="label">Sheet 2</span>
+                <strong>数据汇总</strong>
+              </div>
+              <div class="preview-actions">
+                <button class="copy-button" data-copy="sheet2-all" type="button">复制全部</button>
+                <button class="copy-button" data-copy="sheet2-body" type="button" title="不含首行表头和第一列">复制数据区</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="sheet2Table"></table>
+            </div>
+          </div>
+        </section>
       </section>
     </main>
 

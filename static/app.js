@@ -12,6 +12,7 @@ const fileName = document.querySelector("#fileName");
 const clearButton = document.querySelector("#clearButton");
 const clearLongPlanButton = document.querySelector("#clearLongPlanButton");
 const processButton = document.querySelector("#processButton");
+const resetWorkspaceButton = document.querySelector("#resetWorkspaceButton");
 const message = document.querySelector("#message");
 const metrics = document.querySelector("#metrics");
 const rowsMetric = document.querySelector("#rowsMetric");
@@ -30,8 +31,6 @@ const previewSection = document.querySelector("#previewSection");
 const sheet2Table = document.querySelector("#sheet2Table");
 const sheet3Table = document.querySelector("#sheet3Table");
 const screenshotInput = document.querySelector("#screenshotInput");
-const selectedScreenshots = document.querySelector("#selectedScreenshots");
-const screenshotName = document.querySelector("#screenshotName");
 const clearScreenshotButton = document.querySelector("#clearScreenshotButton");
 const screenshotThumbs = document.querySelector("#screenshotThumbs");
 const outputNameInput = document.querySelector("#outputNameInput");
@@ -48,6 +47,10 @@ const pastePanel = document.querySelector("#pastePanel");
 const pasteTarget = document.querySelector("#pasteTarget");
 const rateMetricsAsPercent = document.querySelector("#rateMetricsAsPercent");
 const longPlanPanel = document.querySelector(".long-plan-panel");
+const settingsPanel = document.querySelector("#settingsPanel");
+const toggleLongPlan = document.querySelector("#toggleLongPlan");
+const toggleSettings = document.querySelector("#toggleSettings");
+const settlementPreview = document.querySelector("#settlementPreview");
 const longPlanOcrStatus = document.querySelector("#longPlanOcrStatus");
 const ocrPreviewPanel = document.querySelector("#ocrPreviewPanel");
 const ocrPreviewImage = document.querySelector("#ocrPreviewImage");
@@ -70,7 +73,22 @@ let previewData = {};
 let activeOcrButton = null;
 let ocrInstallable = false;
 let sheet3SelectionMode = false;
+let sessionId = 0;
+let processController = null;
+let ocrController = null;
+let lightboxTrigger = null;
 const sheet3SelectedCells = new Set();
+
+document.body.classList.toggle("is-mac-electron", /Electron\//.test(navigator.userAgent) && /Mac/.test(navigator.platform));
+
+function setPanelOpen(panel, open) {
+  panel.hidden = !open;
+  const button = panel === longPlanPanel ? toggleLongPlan : toggleSettings;
+  button.setAttribute("aria-expanded", String(open));
+}
+
+toggleLongPlan.addEventListener("click", () => setPanelOpen(longPlanPanel, longPlanPanel.hidden));
+toggleSettings.addEventListener("click", () => setPanelOpen(settingsPanel, settingsPanel.hidden));
 
 const moneyFormatter = new Intl.NumberFormat("zh-CN", {
   style: "currency",
@@ -81,6 +99,9 @@ const moneyFormatter = new Intl.NumberFormat("zh-CN", {
 const numberFormatter = new Intl.NumberFormat("zh-CN");
 
 function resetResult() {
+  processController?.abort();
+  processController = null;
+  setProcessBusy(false);
   metrics.hidden = true;
   downloadCard.hidden = true;
   warningsCard.hidden = true;
@@ -89,20 +110,62 @@ function resetResult() {
   sheet2Table.innerHTML = "";
   sheet3Table.innerHTML = "";
   previewData = {};
-  clearSheet3Selection();
+  setSheet3SelectionMode(false);
   outputName.textContent = "";
   downloadLink.removeAttribute("href");
   imageDownloadLink.hidden = true;
   copyImageButton.hidden = true;
   imageDownloadLink.removeAttribute("href");
+  delete copyImageButton.dataset.imageUrl;
   warningsList.innerHTML = "";
   screenshotCheckGrid.innerHTML = "";
   screenshotCheckMessage.textContent = "";
   screenshotCheckStatus.textContent = "";
 }
 
+function setProcessBusy(busy) {
+  processButton.disabled = busy || !currentFiles.length;
+  processButton.textContent = busy ? "正在生成…" : "生成表格";
+  processButton.classList.toggle("is-busy", busy);
+  processButton.setAttribute("aria-busy", String(busy));
+}
+
+function resetWorkspace() {
+  sessionId += 1;
+  ocrController?.abort();
+  ocrController = null;
+  closeImageLightbox();
+  fileInput.value = "";
+  screenshotInput.value = "";
+  longPlanOcrInput.value = "";
+  outputNameInput.value = "";
+  setFiles([]);
+  screenshotFiles = [];
+  setScreenshots();
+  clearLongPlanRow();
+  setLongPlanOcrState("");
+  setPanelOpen(longPlanPanel, false);
+  setPanelOpen(settingsPanel, false);
+  [useThousands, transposeSummary, removeZeroColumns, crossHighlight, rateMetricsAsPercent].forEach((input) => {
+    input.checked = input.defaultChecked;
+  });
+  document.querySelectorAll("input[name='decimalMode']").forEach((input) => {
+    input.checked = input.defaultChecked;
+  });
+  pastePanel.hidden = true;
+  screenshotZone.classList.remove("is-pasting");
+  pasteTarget.textContent = "在这里按 Cmd+V / Ctrl+V 粘贴截图";
+  window.getSelection()?.removeAllRanges();
+  message.textContent = "已清空当前资料，可以重新开始。已下载的文件不会删除。";
+  window.scrollTo({ top: 0, behavior: "instant" });
+  chooseButton.focus({ preventScroll: true });
+}
+
+resetWorkspaceButton.addEventListener("click", resetWorkspace);
+
 function setFiles(files) {
   currentFiles = [...files];
+  dropzone.classList.toggle("has-files", currentFiles.length > 0);
   resetResult();
   if (!currentFiles.length) {
     selectedFile.hidden = true;
@@ -119,48 +182,61 @@ function setFiles(files) {
   message.textContent = "文件已就绪，可以生成 XLSX。";
 }
 
-function setScreenshots(files) {
+function setScreenshots() {
+  resetResult();
+  screenshotZone.classList.toggle("has-files", screenshotFiles.length > 0);
+  clearScreenshotButton.hidden = !screenshotFiles.length;
+  pastePanel.hidden = true;
+  screenshotZone.classList.remove("is-pasting");
+  screenshotThumbUrls.forEach((url) => URL.revokeObjectURL(url));
+  screenshotThumbUrls = [];
+  screenshotThumbs.replaceChildren();
   if (!screenshotFiles.length) {
-    selectedScreenshots.hidden = true;
     screenshotThumbs.hidden = true;
-    screenshotThumbs.innerHTML = "";
-    screenshotThumbUrls.forEach((url) => URL.revokeObjectURL(url));
-    screenshotThumbUrls = [];
-    screenshotName.textContent = "";
     return;
   }
-  selectedScreenshots.hidden = false;
-  screenshotName.textContent = screenshotFiles.length === 1
-    ? screenshotFiles[0].name
-    : `${screenshotFiles.length} 张截图：${screenshotFiles.map((file) => file.name).join("、")}`;
-  screenshotThumbUrls.forEach((url) => URL.revokeObjectURL(url));
   screenshotThumbUrls = screenshotFiles.map((file) => URL.createObjectURL(file));
-  screenshotThumbs.innerHTML = screenshotFiles.map((file, index) => `
-    <div class="thumb-card">
-      <button class="thumb-image-button" data-preview-screenshot="${index}" type="button" aria-label="放大查看 ${file.name}">
-        <img src="${screenshotThumbUrls[index]}" alt="${file.name}">
-      </button>
-      <div class="thumb-meta">
-        <span title="${file.name}">${file.name}</span>
-        <button class="thumb-remove" data-remove-screenshot="${index}" type="button" aria-label="移除 ${file.name}">移除</button>
-      </div>
-    </div>
-  `).join("");
+  screenshotFiles.forEach((file, index) => {
+    const card = document.createElement("div");
+    card.className = "thumb-card";
+    card.innerHTML = '<button class="thumb-image-button" type="button"><img></button><div class="thumb-meta"><span></span><button class="thumb-remove" type="button">移除</button></div>';
+    const previewButton = card.querySelector(".thumb-image-button");
+    previewButton.dataset.previewScreenshot = index;
+    previewButton.setAttribute("aria-label", `放大查看 ${file.name}`);
+    const img = card.querySelector("img");
+    img.src = screenshotThumbUrls[index];
+    img.alt = file.name;
+    const label = card.querySelector("span");
+    label.textContent = file.name;
+    label.title = file.name;
+    const removeButton = card.querySelector(".thumb-remove");
+    removeButton.dataset.removeScreenshot = index;
+    removeButton.setAttribute("aria-label", `移除 ${file.name}`);
+    screenshotThumbs.appendChild(card);
+  });
   screenshotThumbs.hidden = false;
 }
 
 function showImageLightbox(src, title = "图片预览") {
   if (!src) return;
+  lightboxTrigger = document.activeElement;
   lightboxImage.src = src;
   lightboxImage.alt = title;
   lightboxTitle.textContent = title;
   imageLightbox.hidden = false;
+  document.querySelector(".shell").inert = true;
+  document.body.style.overflow = "hidden";
+  closeLightboxButton.focus();
 }
 
 function closeImageLightbox() {
   imageLightbox.hidden = true;
   lightboxImage.removeAttribute("src");
   lightboxImage.alt = "";
+  document.querySelector(".shell").inert = false;
+  document.body.style.overflow = "";
+  if (lightboxTrigger?.isConnected) lightboxTrigger.focus({ preventScroll: true });
+  lightboxTrigger = null;
 }
 
 function friendlyErrorText(error, fallback = "操作失败，请重试。") {
@@ -187,7 +263,7 @@ function setOcrPreview(file) {
   ocrPreviewImage.src = ocrPreviewUrl;
   ocrPreviewImage.alt = file.name || "长期计划识别截图预览";
   ocrPreviewPanel.hidden = false;
-  longPlanPanel.open = true;
+  setPanelOpen(longPlanPanel, true);
 }
 
 function clearOcrPreview() {
@@ -219,7 +295,7 @@ function fillLongPlanRow(fields) {
     const value = fields[input.dataset.longPlan];
     if (value !== undefined && value !== null && value !== "") input.value = value;
   });
-  document.querySelector(".long-plan-panel").open = true;
+  setPanelOpen(longPlanPanel, true);
 }
 
 function clearLongPlanRow() {
@@ -236,7 +312,7 @@ function addScreenshots(files) {
   const images = [...files].filter((file) => file.type.startsWith("image/") || /\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|tif|tiff|webp)$/i.test(file.name));
   if (!images.length) return;
   screenshotFiles = [...screenshotFiles, ...images];
-  setScreenshots(screenshotFiles);
+  setScreenshots();
 }
 
 function setLongPlanOcrState(state, text = "", button = null) {
@@ -278,6 +354,10 @@ async function refreshOcrStatus(showReady = false) {
 }
 
 async function recognizeLongPlanImage(file, button = null) {
+  const currentSession = sessionId;
+  ocrController?.abort();
+  const controller = new AbortController();
+  ocrController = controller;
   setOcrPreview(file);
   const formData = new FormData();
   formData.append("ocrImage", file);
@@ -286,8 +366,10 @@ async function recognizeLongPlanImage(file, button = null) {
   const response = await fetch("/api/ocr-long-plan", {
     method: "POST",
     body: formData,
+    signal: controller.signal,
   });
   const payload = await response.json();
+  if (currentSession !== sessionId || controller.signal.aborted) return;
   if (!response.ok || !payload.ok) {
     const error = new Error(payload.error || "OCR 识别失败。");
     error.code = payload.code || "";
@@ -507,22 +589,25 @@ function applyCrossHighlight(cell) {
   cell.classList.add("is-active-cell");
 }
 
-function rowsToTsv(rows) {
-  return rows.map((row) => row.map((value) => formatCell(value, row)).join("\t")).join("\n");
+function rowsToTsv(rows, excludeLabels = false) {
+  const selectedRows = excludeLabels ? rows.slice(1) : rows;
+  return selectedRows.map((row) => (excludeLabels ? row.slice(1) : row)
+    .map((value) => formatCell(value, row)).join("\t")).join("\n");
 }
 
 async function copyRows(key, includeHeader) {
   const rows = previewData[key] || [];
-  const copyRows = includeHeader ? rows : rows.slice(1);
-  if (!copyRows.length) return;
-  await navigator.clipboard.writeText(rowsToTsv(copyRows));
-  message.textContent = includeHeader ? "已复制全部表格。" : "已复制去表头数据。";
+  if (rows.length <= (includeHeader ? 0 : 1)) return;
+  await navigator.clipboard.writeText(rowsToTsv(rows, !includeHeader));
+  message.textContent = includeHeader ? "已复制全部表格。" : "已复制数据区，不含首行表头和第一列。";
 }
 
 chooseButton.addEventListener("click", () => fileInput.click());
 chooseScreenshotButton.addEventListener("click", () => screenshotInput.click());
 pasteScreenshotButton.addEventListener("click", async () => {
+  const currentSession = sessionId;
   pastePanel.hidden = false;
+  screenshotZone.classList.add("is-pasting");
   pasteTarget.focus();
   message.textContent = "请在粘贴框内按 Cmd+V / Ctrl+V 粘贴截图。";
   if (navigator.clipboard?.read) {
@@ -536,10 +621,12 @@ pasteScreenshotButton.addEventListener("click", async () => {
         files.push(new File([blob], `剪切板截图-${Date.now()}.png`, { type: imageType }));
       }
       if (files.length) {
+        if (currentSession !== sessionId) return;
         addScreenshots(files);
         message.textContent = "已直接读取剪切板截图。";
       }
     } catch (error) {
+      if (currentSession !== sessionId) return;
       message.textContent = friendlyErrorText(error, "无法直接读取剪切板，请在粘贴框里按 Cmd+V / Ctrl+V。");
     }
   }
@@ -584,7 +671,7 @@ longPlanInputs().forEach((input) => {
 clearScreenshotButton.addEventListener("click", () => {
   screenshotInput.value = "";
   screenshotFiles = [];
-  setScreenshots(screenshotFiles);
+  setScreenshots();
 });
 
 screenshotThumbs.addEventListener("click", (event) => {
@@ -599,8 +686,7 @@ screenshotThumbs.addEventListener("click", (event) => {
   const index = Number(button.dataset.removeScreenshot);
   if (!Number.isInteger(index)) return;
   const [removed] = screenshotFiles.splice(index, 1);
-  resetResult();
-  setScreenshots(screenshotFiles);
+  setScreenshots();
   message.textContent = removed ? `已移除截图：${removed.name}` : "截图已移除。";
 });
 
@@ -654,12 +740,14 @@ document.querySelector(".long-plan-heading .button-row").addEventListener("click
 
 installOcrButton.addEventListener("click", async () => {
   if (!ocrInstallable) return;
+  const currentSession = sessionId;
   const idleText = installOcrButton.textContent;
   try {
     setLongPlanOcrState("busy", "正在安装截图识别组件，请不要关闭软件。", installOcrButton);
     installOcrButton.dataset.idleText = idleText;
     const response = await fetch("/api/install-ocr", { method: "POST" });
     const payload = await response.json();
+    if (currentSession !== sessionId) return;
     if (!response.ok || !payload.ok || !payload.installed) {
       throw new Error(payload.error || "截图识别组件安装失败。");
     }
@@ -668,21 +756,24 @@ installOcrButton.addEventListener("click", async () => {
     message.textContent = "截图识别组件已安装，可以识别长期计划截图。";
     await refreshOcrStatus();
   } catch (error) {
+    if (currentSession !== sessionId) return;
     const text = friendlyErrorText(error, "截图识别组件安装失败。");
     setLongPlanOcrState("error", text);
     message.textContent = text;
   } finally {
-    installOcrButton.textContent = idleText;
+    if (currentSession === sessionId) installOcrButton.textContent = idleText;
   }
 });
 
 longPlanOcrInput.addEventListener("change", async () => {
+  const currentSession = sessionId;
   const [file] = longPlanOcrInput.files;
   longPlanOcrInput.value = "";
   if (!file) return;
   try {
     await recognizeLongPlanImage(file, ocrLongPlanButton);
   } catch (error) {
+    if (currentSession !== sessionId || error.name === "AbortError") return;
     const text = ocrErrorText(error);
     setLongPlanOcrState("error", text);
     message.textContent = text;
@@ -690,10 +781,14 @@ longPlanOcrInput.addEventListener("change", async () => {
 });
 
 ocrClipboardButton.addEventListener("click", async () => {
+  const currentSession = sessionId;
   try {
     setLongPlanOcrState("busy", "正在读取剪切板截图。", ocrClipboardButton);
-    await recognizeLongPlanImage(await imageFromClipboard(), ocrClipboardButton);
+    const file = await imageFromClipboard();
+    if (currentSession !== sessionId) return;
+    await recognizeLongPlanImage(file, ocrClipboardButton);
   } catch (error) {
+    if (currentSession !== sessionId || error.name === "AbortError") return;
     const text = ocrErrorText(error);
     setLongPlanOcrState("error", text);
     message.textContent = text;
@@ -701,6 +796,7 @@ ocrClipboardButton.addEventListener("click", async () => {
 });
 
 function handlePaste(event) {
+  if (event.defaultPrevented) return;
   const files = [...event.clipboardData.files].filter((file) => file.type.startsWith("image/"));
   if (!files.length) return;
   event.preventDefault();
@@ -711,7 +807,7 @@ function handlePaste(event) {
 
 pasteTarget.addEventListener("paste", handlePaste);
 document.addEventListener("paste", (event) => {
-  if (!pastePanel.hidden || event.target === document.body) {
+  if (!pastePanel.hidden || screenshotZone.contains(event.target) || event.target === document.body) {
     handlePaste(event);
   }
 });
@@ -731,16 +827,20 @@ processButton.addEventListener("click", async () => {
   formData.append("rateMetricsAsPercent", rateMetricsAsPercent.checked ? "true" : "false");
   formData.append("decimalMode", activeDecimalMode());
 
-  processButton.disabled = true;
   resetResult();
+  const controller = new AbortController();
+  processController = controller;
+  setProcessBusy(true);
   message.textContent = "正在生成三表结构，请稍等。";
 
   try {
     const response = await fetch("/api/process", {
       method: "POST",
       body: formData,
+      signal: controller.signal,
     });
     const payload = await response.json();
+    if (controller.signal.aborted) return;
     if (!response.ok || !payload.ok) {
       throw new Error(payload.error || "处理失败。");
     }
@@ -768,10 +868,19 @@ processButton.addEventListener("click", async () => {
       warningsCard.hidden = false;
     }
     message.textContent = "XLSX 已生成，数据汇总已按当前面板设置处理。";
+    settlementPreview.focus({ preventScroll: true });
+    settlementPreview.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      block: "start",
+    });
   } catch (error) {
+    if (controller.signal.aborted) return;
     message.textContent = friendlyErrorText(error, "处理失败，请检查导入文件后重试。");
   } finally {
-    processButton.disabled = !currentFiles.length;
+    if (processController === controller) {
+      processController = null;
+      setProcessBusy(false);
+    }
   }
 });
 
@@ -795,6 +904,10 @@ closeLightboxBackdrop.addEventListener("click", closeImageLightbox);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !imageLightbox.hidden) {
     closeImageLightbox();
+  }
+  if (event.key === "Tab" && !imageLightbox.hidden) {
+    event.preventDefault();
+    closeLightboxButton.focus();
   }
 });
 
